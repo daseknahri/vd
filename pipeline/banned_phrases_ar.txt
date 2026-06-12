@@ -1,0 +1,24 @@
+# Engagement-bait phrases banned from post title/description/hashtags
+# (PLAN.md 3.1 — platforms penalize this language). One phrase per line.
+# Matching is done on normalized text (diacritics/tatweel stripped, alef
+# variants + ta-marbuta/alef-maqsura folded, casefolded), anchored at word
+# boundaries — keep entries unvocalized and lowercase.
+اشترك في القناة
+اشتركوا في القناة
+اشترك الان
+لا تنس الاشتراك
+لا تنسوا الاشتراك
+فعل الجرس
+فعلوا الجرس
+لايك
+شير
+حط لايك
+اعمل لايك
+شارك الفيديو
+اضغط زر الاعجاب
+اضغط على زر الاشتراك
+تابعنا للمزيد
+subscribe
+like and share
+smash that like
+hit the bell

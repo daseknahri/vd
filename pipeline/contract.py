@@ -73,11 +73,15 @@ VOICEOVER = "voiceover.mp3"
 TIMING = "timing.json"
 CLIPS_DIR = "clips"
 CAPTIONS = "captions.ass"
+CAPTIONS_DIR = "captions"             # caption frame PNGs (captions -> render)
+CAPTIONS_MANIFEST = "manifest.json"   # inside CAPTIONS_DIR (captions -> render)
 CONTACT_SHEET = "contact_sheet.html"
 FINAL = "final.mp4"
 POST = "post.json"
 PRONUNCIATION = "pronunciation.json"  # optional per-project TTS override map
 PROJECT_CONFIG = "project.yaml"       # optional per-project config overrides
+FOOTAGE_REPORT = "footage_report.json"  # footage -> review
+RENDER_REPORT = "render_report.json"    # render -> review
 GATE1_APPROVED = ".gate1_script_approved"   # human gate markers
 GATE2_APPROVED = ".gate2_review_approved"
 
@@ -102,15 +106,23 @@ def _deep_merge(base: dict, override: dict) -> dict:
     return out
 
 
+def _read_yaml(path: Path) -> dict[str, Any]:
+    with open(path, encoding="utf-8") as f:
+        try:
+            return yaml.safe_load(f) or {}
+        except yaml.YAMLError as exc:
+            # Contract violation, not a crash: the orchestrator records it
+            # and batch mode keeps going.
+            raise ContractError(f"{path.name} is not valid YAML: {exc}") from exc
+
+
 def load_config(project_dir: Path | None = None) -> dict[str, Any]:
     """Global config.yaml, deep-merged with the project's project.yaml."""
-    with open(ROOT / "config.yaml", encoding="utf-8") as f:
-        cfg = yaml.safe_load(f) or {}
+    cfg = _read_yaml(ROOT / "config.yaml")
     if project_dir is not None:
         override_path = Path(project_dir) / PROJECT_CONFIG
         if override_path.exists():
-            with open(override_path, encoding="utf-8") as f:
-                cfg = _deep_merge(cfg, yaml.safe_load(f) or {})
+            cfg = _deep_merge(cfg, _read_yaml(override_path))
     return cfg
 
 
@@ -298,7 +310,13 @@ class Project:
 
     def read_json(self, name: str) -> Any:
         with open(self.path(name), encoding="utf-8") as f:
-            return json.load(f)
+            try:
+                return json.load(f)
+            except json.JSONDecodeError as exc:
+                # A garbled contracted file is a contract violation, not an
+                # uncaught crash: the orchestrator records ContractError on
+                # the project status so batch mode keeps going.
+                raise ContractError(f"{name} is not valid JSON: {exc}") from exc
 
     def write_json(self, name: str, data: Any) -> Path:
         p = self.path(name)
@@ -341,3 +359,8 @@ class Project:
 
     def approve_gate(self, marker: str) -> None:
         self.path(marker).write_text("approved\n", encoding="utf-8")
+
+    def revoke_gate(self, marker: str) -> None:
+        """Remove a gate approval: the approved content no longer exists
+        (redo / forced re-run), so the human must review again."""
+        self.path(marker).unlink(missing_ok=True)
