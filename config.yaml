@@ -1,0 +1,53 @@
+# Video Factory — global configuration.
+# Per-project overrides live in projects/<slug>/project.yaml (same keys).
+
+video:
+  aspect_ratio: "9:16"        # "9:16" (Reels/Shorts) or "16:9" (in-stream)
+  width: 1080
+  height: 1920
+  fps: 30
+  target_seconds: 90
+
+script:
+  audience: "general Arab"
+  dialect: "MSA"              # one register per video; enforced by the video-script skill
+
+voice:
+  provider: "elevenlabs"      # thin interface — swappable (see pipeline/voice.py)
+  voice_id: ""                # REQUIRED: your ElevenLabs voice id
+  model_id: "eleven_multilingual_v2"
+  stability: 0.5
+  similarity_boost: 0.75
+  speed: 1.0
+
+footage:
+  providers: ["pexels", "pixabay"]   # tried in order
+  min_height: 1080
+  orientation: "portrait"            # derived from aspect_ratio if omitted
+  used_clip_log: "assets/used_clips.json"
+  ai_broll: false                    # if true, output must be labeled as AI-generated
+
+captions:
+  font: "Tajawal"
+  font_size: 64
+  primary_color: "&H00FFFFFF"        # ASS BGR hex — white
+  highlight_color: "&H0000D7FF"      # karaoke highlight — amber
+  outline_color: "&H00000000"
+  outline: 3
+  margin_v: 280                      # keep clear of platform UI overlays
+  karaoke: true                      # word-level highlight from timing.json
+
+audio:
+  music_dir: "assets/music"
+  music_gain_db: -14                 # bed level before ducking
+  duck_threshold: 0.05               # sidechain compression settings
+  duck_ratio: 8
+  loudness_lufs: -16                 # EBU R128 target (per-platform spec)
+
+transcribe:
+  model: "small"                     # faster-whisper model size
+  device: "cpu"
+  compute_type: "int8"
+
+publish:
+  auto_post: false                   # stays false until the format is proven
