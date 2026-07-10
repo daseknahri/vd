@@ -4,9 +4,11 @@ Self-hosted pipeline: a source video URL becomes an **original, Arabic,
 faceless video** ready to publish. Orchestrated by Claude Code. The only
 recurring variable cost is text-to-speech.
 
-Read [PLAN.md](PLAN.md) for the full design and
-[CLAUDE.md](CLAUDE.md) for engineering conventions (including why Arabic
-captions are rendered with Pillow+raqm instead of libass on Windows).
+**Setting this up on a new machine?** Start with [SETUP.md](SETUP.md)
+(clone → venv → deps → verify, with the cross-platform gotchas). Then
+[PLAN.md](PLAN.md) for the full design and [CLAUDE.md](CLAUDE.md) for
+engineering conventions (including why Arabic captions are rendered with
+Pillow+raqm instead of libass on Windows).
 
 ## Where you do the work
 
@@ -27,6 +29,9 @@ activation, prefix every command with `.\.venv\Scripts\python.exe` instead
 of `python`.
 
 ## One-time setup
+
+Fresh machine? Install Python/venv/ffmpeg/deps via [SETUP.md](SETUP.md)
+first. Then configure this checkout:
 
 1. `copy .env.example .env` and fill in `ELEVENLABS_API_KEY`,
    `PEXELS_API_KEY` (and optionally `PIXABAY_API_KEY`).

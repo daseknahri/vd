@@ -1,0 +1,24 @@
+# Video Factory — direct Python dependencies (Python 3.12).
+# Install:  pip install -r requirements.txt
+# Transitive deps (ctranslate2, av, huggingface-hub, tokenizers, ...) are
+# resolved automatically by pip.
+#
+# IMPORTANT: Pillow must be built WITH raqm (HarfBuzz) or Arabic captions
+# render as disconnected tofu. Windows wheels bundle raqm; on Linux/macOS
+# see SETUP.md ("the one cross-platform gotcha"). Verify with:
+#   python -c "from PIL import features; print(features.check('raqm'))"  # -> True
+#
+# Verified-good versions (Windows, 2026-07-10): yt-dlp 2026.6.9,
+# faster-whisper 1.2.1, requests 2.34.2, PyYAML 6.0.3, python-dotenv 1.2.2,
+# pillow 12.2.0, fonttools 4.63.0, pytest 9.0.3.
+
+yt-dlp>=2026.6.9        # ingest: audio download. Upgrade often — sites change.
+faster-whisper>=1.2.0   # ingest/align: local Whisper transcription (CTranslate2)
+requests>=2.32,<3       # all HTTP (ElevenLabs, Pexels, Pixabay)
+PyYAML>=6.0             # config.yaml / project.yaml
+python-dotenv>=1.0      # .env loading
+pillow>=11.0            # captions: RTL Arabic shaping — MUST have raqm (see above)
+fonttools>=4.60         # captions: font family -> file resolution
+
+# Dev / verification only:
+pytest>=8.0

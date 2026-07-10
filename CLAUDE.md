@@ -6,6 +6,8 @@ video. Orchestrated by Claude Code. The only variable cost is TTS.
 This file is auto-loaded into every Claude Code session opened in this
 folder; it is the engineering contract. Companion docs:
 
+- **SETUP.md** — set the project up on another machine (clone → venv →
+  deps → verify; cross-platform gotchas: Pillow/raqm, ffmpeg discovery).
 - **README.md** — how to *operate* it: the per-topic command loop + setup.
 - **PLAN.md** — the product design and phased rationale.
 - **.claude/skills/video-script/SKILL.md** — the skill that writes each
