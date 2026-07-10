@@ -18,11 +18,22 @@ the read is a pleasure, not a correction session.
 
 ## Inputs
 
-1. `projects/<slug>/transcript.txt` — transcript of the SOURCE video.
-   Research material only.
-2. Defaults from `config.yaml` → `script.audience`, `script.dialect`,
-   `video.target_seconds` (overridable per project via `project.yaml`
-   or explicit user instruction).
+A project is one of two modes — detect by which file is present:
+
+- **URL-first** — `projects/<slug>/transcript.txt` exists: transcript of
+  the SOURCE video, research material only. Apply the originality rule
+  below in full.
+- **Topic-first** — `projects/<slug>/topic.txt` exists (no transcript):
+  a single line naming the topic. There is no source to rewrite, so the
+  script is original by construction — but you still own the angle, the
+  facts, and the localization. Invent a strong, specific take on the topic
+  rather than a generic listicle; verify every fact; localize examples.
+
+Then, common to both:
+
+- Defaults from `config.yaml` → `script.audience`, `script.dialect`,
+  `video.target_seconds` (overridable per project via `project.yaml`
+  or explicit user instruction).
 
 ## The originality rule (non-negotiable)
 
@@ -132,6 +143,10 @@ Write `projects/<slug>/script.json`, UTF-8, `ensure_ascii=False` style
   "post": { "title": "", "description": "", "hashtags": [] }
 }
 ```
+
+`meta.source_url` provenance: URL-first → the real source URL (from
+`source_url.txt`); topic-first → `topic://` followed by the topic
+(e.g. `"topic://حقائق عن الصحراء"`), so the origin is always recorded.
 
 Scene ids start at 1, sequential. After writing, ALWAYS validate (ASCII
 command — never put Arabic in a shell string):

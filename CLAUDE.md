@@ -11,13 +11,13 @@ folder; it is the engineering contract. Companion docs:
 - **.claude/skills/video-script/SKILL.md** — the skill that writes each
   Arabic script (the `script` stage; runs inside Claude Code).
 
-## Current status (2026-06-15)
+## Current status (2026-07-10)
 
 - **Built and green:** all 8 stages + orchestrator + the video-script
   skill. `pytest tests/ -q` = **158 passing**, no network or keys needed.
 - **Verified against reality:** `render` (real ffmpeg; RTL captions checked
   on actual rendered frames) and `ingest` (real yt-dlp + faster-whisper on
-  a live YouTube URL, 2026-06-15).
+  a live YouTube URL, 2026-07-10).
 - **Not yet exercised live:** `voice` (ElevenLabs) and `footage`
   (Pexels/Pixabay) — they need paid API keys, so they only run once `.env`
   is filled. Their logic is unit-tested with mocks.
@@ -37,7 +37,7 @@ pytest, then act on the specific request.
   `.venv\Scripts\python.exe tests\make_sample.py` → inspect
   `projects\sample-demo\final.mp4`.
 - Operate for real: see **README.md**. CLI verbs (`python run.py <verb>`):
-  `new | process | approve | redo | batch`.
+  `new | new-topic | process | approve | redo | batch`.
 - **`run.py process` exits with code 1 whenever it stops at a gate**
   (script-not-written, gate 1, gate 2). That is the *designed pause*, not a
   failure — read the printed message before treating it as an error.
@@ -49,6 +49,13 @@ Stage order, driven by `run.py process`:
 ```
 ingest → script → [GATE 1] → voice → footage → captions → render → review → [GATE 2] → publish
 ```
+
+Two entry points (`Project.is_topic_first()` distinguishes them):
+**URL-first** (`new`, writes `source_url.txt`) runs the full order above;
+**topic-first** (`new-topic`, writes `topic.txt`) has no source video, so
+the orchestrator **drops the ingest stage** and the script stage works from
+`topic.txt` instead of `transcript.txt`. Everything from `script` onward is
+identical.
 
 Every stage reads/writes files in `projects/<slug>/` and is independently
 re-runnable (idempotent). The exact per-stage file I/O table lives in the
@@ -79,7 +86,7 @@ seconds.
    changed work (`Project.revoke_gate`) so nothing ships unreviewed.
 3. **Arabic captions are NEVER rendered through libass / the ffmpeg
    `subtitles` filter on Windows.** Windows ffmpeg builds (gyan, BtbN —
-   both verified 2026-06) ship libass without HarfBuzz: it falls back to
+   both verified 2026-07) ship libass without HarfBuzz: it falls back to
    legacy presentation-form shaping and modern fonts (Tajawal/Cairo) render
    tofu boxes for isolated/final forms. All caption rendering goes through
    `pipeline/captions.py` (Pillow + libraqm = real HarfBuzz shaping,

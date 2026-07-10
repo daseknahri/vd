@@ -1,11 +1,13 @@
 """Video Factory orchestrator: source URL -> reviewed Arabic video.
 
 Commands:
-    new      <url> [--slug S]             create a project folder
-    process  <project_dir>                run stages, pausing at human gates
-    approve  <project_dir> --gate 1|2     record a human gate approval
-    redo     <project_dir> --scenes N...  re-fetch scene footage, re-render
-    batch    <urls.txt>                   process many URLs, summary at end
+    new       <url> [--slug S]            create a URL-first project folder
+    new-topic <topic> [--slug S]          create a topic-first project (no
+                                          source video; ingest is skipped)
+    process   <project_dir>               run stages, pausing at human gates
+    approve   <project_dir> --gate 1|2    record a human gate approval
+    redo      <project_dir> --scenes N... re-fetch scene footage, re-render
+    batch     <urls.txt>                  process many URLs, summary at end
 
 The two human gates (script read, contact-sheet glance) are never skipped
 and never block interactively: when a gate is not yet approved the command
@@ -60,6 +62,18 @@ PIPELINE: list[tuple[str, Any]] = [
 ]
 
 GATE_MARKERS = {1: contract.GATE1_APPROVED, 2: contract.GATE2_APPROVED}
+
+
+def _effective_pipeline(project: Project) -> list[tuple[str, Any]]:
+    """The run order for this project.
+
+    Topic-first projects (topic.txt, no source video) have nothing to
+    download or transcribe, so the ingest stage is dropped; the script
+    stage then works from topic.txt instead of transcript.txt.
+    """
+    if project.is_topic_first():
+        return [step for step in PIPELINE if step != ("stage", "ingest")]
+    return PIPELINE
 
 
 def say(text: str = "") -> None:
@@ -134,7 +148,7 @@ def _run_stages(project: Project, force_stage: str | None = None) -> Status:
         env = contract.load_env()
         if force_stage is not None:
             _revoke_downstream_gates(project, force_stage)
-        for kind, value in PIPELINE:
+        for kind, value in _effective_pipeline(project):
             if kind == "gate":
                 gate = int(value)
                 if not project.gate_approved(GATE_MARKERS[gate]):
@@ -181,29 +195,48 @@ def _open_project(path_str: str) -> Project | None:
     return Project(dir=path)
 
 
-def _create_project(url: str, slug: str | None, projects_root: Path | None) -> Project:
-    """Create (or reuse) the project folder for a URL.
+def _create_marked_project(marker: str, content: str, slug: str,
+                           projects_root: Path | None) -> Project:
+    """Create (or reuse) a project folder identified by a marker file.
 
-    slugify truncates to 40 chars, so two DIFFERENT URLs can map to the
-    same folder name; silently merging them would attribute one URL's
-    transcript to the other. Same URL -> same folder (idempotent);
-    different URL -> a numeric suffix keeps the projects distinct.
+    slugify truncates to 40 chars, so two DIFFERENT sources can map to the
+    same folder name; silently merging them would attribute one source's
+    work to the other. Same content -> same folder (idempotent); different
+    content -> a numeric suffix keeps the projects distinct.
     """
-    base = contract.slugify(slug or _slug_from_url(url))
+    base = contract.slugify(slug)
     candidate = base
     n = 2
     while True:
         project = Project.create(candidate, projects_root=projects_root)
-        marker = project.path(contract.SOURCE_URL)
-        if (marker.exists()
-                and marker.read_text(encoding="utf-8").strip() != url):
+        existing = project.path(marker)
+        if (existing.exists()
+                and existing.read_text(encoding="utf-8").strip() != content.strip()):
             suffix = f"-{n}"
             candidate = base[:40 - len(suffix)] + suffix
             n += 1
             continue
         break
-    project.write_text(contract.SOURCE_URL, url + "\n")
+    project.write_text(marker, content + "\n")
     return project
+
+
+def _create_project(url: str, slug: str | None, projects_root: Path | None) -> Project:
+    """Create (or reuse) the URL-first project folder for a source URL."""
+    return _create_marked_project(
+        contract.SOURCE_URL, url, slug or _slug_from_url(url), projects_root)
+
+
+def _create_topic_project(topic: str, slug: str | None,
+                          projects_root: Path | None) -> Project:
+    """Create (or reuse) a topic-first project folder for a bare topic.
+
+    An Arabic topic slugifies to 'untitled' (slugify is ASCII-only), which
+    is harmless — the folder name is cosmetic and topic.txt holds the real
+    topic — but pass --slug for a readable folder name.
+    """
+    return _create_marked_project(
+        contract.TOPIC, topic, slug or topic, projects_root)
 
 
 def cmd_new(args: argparse.Namespace) -> int:
@@ -214,6 +247,19 @@ def cmd_new(args: argparse.Namespace) -> int:
     project = _create_project(url, args.slug, args.projects_root)
     say(f"created {project.dir}")
     say(f'next: python run.py process "{project.dir}"')
+    return 0
+
+
+def cmd_new_topic(args: argparse.Namespace) -> int:
+    topic = args.topic.strip()
+    if not topic:
+        say("error: empty topic")
+        return 1
+    project = _create_topic_project(topic, args.slug, args.projects_root)
+    say(f"created {project.dir} (topic-first: no source video, ingest skipped)")
+    say(f'next: python run.py process "{project.dir}"')
+    say("      it stops immediately for the script - write it with the")
+    say("      video-script skill in Claude Code (it reads topic.txt).")
     return 0
 
 
@@ -342,6 +388,13 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--slug", help="project slug (default: derived from the URL)")
     p.add_argument("--projects-root", type=Path, default=None, help=argparse.SUPPRESS)
     p.set_defaults(func=cmd_new)
+
+    p = sub.add_parser("new-topic",
+                       help="create a project from a bare topic (no source video)")
+    p.add_argument("topic", help="the video topic (e.g. \"3 facts about the Sahara\")")
+    p.add_argument("--slug", help="project slug (recommended for Arabic topics)")
+    p.add_argument("--projects-root", type=Path, default=None, help=argparse.SUPPRESS)
+    p.set_defaults(func=cmd_new_topic)
 
     p = sub.add_parser("process", help="run pipeline stages, pausing at human gates")
     p.add_argument("project_dir")

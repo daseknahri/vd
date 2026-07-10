@@ -65,7 +65,8 @@ def ffmpeg_path(tool: str = "ffmpeg") -> str:
 
 # Canonical file names inside a project folder. Stages must use these
 # constants, never literals, so the contract stays in one place.
-SOURCE_URL = "source_url.txt"
+SOURCE_URL = "source_url.txt"        # URL-first projects: the research video
+TOPIC = "topic.txt"                  # topic-first projects: a bare topic line
 SOURCE_VIDEO = "source.mp4"          # research-only; never enters the output
 TRANSCRIPT = "transcript.txt"
 SCRIPT = "script.json"
@@ -344,6 +345,12 @@ class Project:
     # -- stage state -------------------------------------------------------
     def has(self, name: str) -> bool:
         return self.path(name).exists()
+
+    def is_topic_first(self) -> bool:
+        """True when the project starts from a bare topic (topic.txt) with no
+        source video to ingest. URL-first projects (source_url.txt) take
+        precedence if somehow both markers exist."""
+        return self.has(TOPIC) and not self.has(SOURCE_URL)
 
     def clips(self) -> list[Path]:
         if not (self.dir / CLIPS_DIR).exists():

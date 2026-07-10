@@ -37,11 +37,23 @@ of `python`.
 ## One video per topic — the loop you repeat every time
 
 Each topic becomes its **own dated folder** under `projects\`; topics never
-collide. Same six steps every time — only the URL changes:
+collide. **Step 1 has two flavours — pick one:**
+
+- **From a source video** (the pipeline studies it and makes a fresh
+  original): `python run.py new <URL>`
+- **From just a topic** (no source video; the download+transcribe step is
+  skipped): `python run.py new-topic "the history of coffee"`
+  — for an Arabic topic, the easiest path is to tell Claude Code your topic
+  and let it create the project (it writes `topic.txt` as UTF-8), or pass
+  `--slug` for a tidy English folder name.
+
+Everything after step 1 is identical. The rest of the loop:
 
 ```text
-python run.py new <URL-for-this-topic>       # 1. creates projects\YYYY-MM-DD-slug\
-python run.py process projects\<slug>        # 2. download + transcribe, then STOPS
+python run.py new <URL-for-this-topic>       # 1a. URL-first project, OR
+python run.py new-topic "<your topic>"       # 1b. topic-first project
+python run.py process projects\<slug>        # 2. (URL-first: download +
+                                             #     transcribe;) then STOPS
       # -> in Claude Code: write the script (video-script skill fills script.json)
 python run.py approve projects\<slug> --gate 1   # 3. after you READ script.json
 python run.py process projects\<slug>        # 4. voice -> footage -> captions ->

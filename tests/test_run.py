@@ -356,6 +356,72 @@ def test_same_url_reuses_the_same_project(tmp_path):
     assert len(list(root.iterdir())) == 1
 
 
+# --------------------------------------------------------------------------
+# new-topic (topic-first: no source video, ingest skipped)
+# --------------------------------------------------------------------------
+
+def test_new_topic_writes_topic_and_no_source_url(tmp_path, capsys):
+    root = tmp_path / "projects"
+    rc = runner.main(["new-topic", "3 facts about the Sahara",
+                      "--projects-root", str(root)])
+    assert rc == 0
+    (pdir,) = list(root.iterdir())
+    p = Project(dir=pdir)
+    assert p.read_text(contract.TOPIC).strip() == "3 facts about the Sahara"
+    assert not p.has(contract.SOURCE_URL)
+    assert p.is_topic_first()
+    assert "topic-first" in capsys.readouterr().out
+
+
+def test_new_topic_empty_exits_one(tmp_path, capsys):
+    rc = runner.main(["new-topic", "   ", "--projects-root", str(tmp_path)])
+    assert rc == 1
+    assert "empty topic" in capsys.readouterr().out
+
+
+def test_topic_first_process_skips_ingest(tmp_path, recorders):
+    """A topic-first project has no source video; process must not run
+    ingest, but must still reach the script stage and stop at gate 1."""
+    root = tmp_path / "projects"
+    runner.main(["new-topic", "the history of coffee", "--projects-root", str(root)])
+    (pdir,) = list(root.iterdir())
+    rc = runner.main(["process", str(pdir)])
+    assert rc == 0  # designed stop at gate 1
+    assert stages_called(recorders) == ["script"]  # ingest skipped
+
+
+def test_topic_first_full_run_never_ingests(tmp_path, recorders):
+    root = tmp_path / "projects"
+    runner.main(["new-topic", "deep sea creatures", "--projects-root", str(root)])
+    (pdir,) = list(root.iterdir())
+    project = Project(dir=pdir)
+    project.approve_gate(contract.GATE1_APPROVED)
+    project.approve_gate(contract.GATE2_APPROVED)
+    rc = runner.main(["process", str(pdir)])
+    assert rc == 0
+    assert stages_called(recorders) == [
+        "script", "voice", "footage", "captions", "render", "review", "publish",
+    ]
+    assert "ingest" not in stages_called(recorders)
+
+
+def test_url_first_project_still_ingests(project, recorders):
+    """Regression guard: the ingest-skip must be topic-first only."""
+    assert not project.is_topic_first()
+    runner.main(["process", str(project.dir)])
+    assert stages_called(recorders)[0] == "ingest"
+
+
+def test_different_topics_stay_distinct(tmp_path):
+    root = tmp_path / "projects"
+    p1 = runner._create_topic_project("coffee", None, root)
+    p2 = runner._create_topic_project("tea", None, root)
+    p3 = runner._create_topic_project("coffee", None, root)  # same as p1
+    assert p1.dir != p2.dir
+    assert p1.dir == p3.dir  # idempotent for the same topic
+    assert len(list(root.iterdir())) == 2
+
+
 def test_batch_no_failures_exits_zero(tmp_path, recorders):
     root = tmp_path / "projects"
     urls = tmp_path / "urls.txt"
