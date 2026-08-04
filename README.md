@@ -38,6 +38,9 @@ first. Then configure this checkout:
 2. Set `voice.voice_id` in `config.yaml` (an ElevenLabs Arabic voice).
 3. Drop at least one royalty-free music bed into `assets/music/`
    (optional — videos render voice-only without it).
+4. Verify readiness (no network, safe to run anytime):
+   `python run.py doctor` — it lists what is still unconfigured before your
+   first real run.
 
 ## One video per topic — the loop you repeat every time
 
@@ -60,11 +63,16 @@ python run.py new-topic "<your topic>"       # 1b. topic-first project
 python run.py process projects\<slug>        # 2. (URL-first: download +
                                              #     transcribe;) then STOPS
       # -> in Claude Code: write the script (video-script skill fills script.json)
+python run.py estimate projects\<slug>       # 3a. (optional) TTS chars/$ before you spend
 python run.py approve projects\<slug> --gate 1   # 3. after you READ script.json
 python run.py process projects\<slug>        # 4. voice -> footage -> captions ->
                                              #    render, then STOPS at gate 2
       # -> open projects\<slug>\contact_sheet.html and look
 python run.py redo projects\<slug> --scenes 3 5  #    (only if a clip is wrong)
+python run.py repair-timing projects\<slug>  #    (only if captions desync from speech)
+python run.py process projects\<slug> --force-stage voice  # (edited a scene's
+                                             #    narration? re-voice + re-render;
+                                             #    the TTS cache only re-bills changed scenes)
 python run.py approve projects\<slug> --gate 2   # 5. after you GLANCE
 python run.py process projects\<slug>        # 6. writes post.json; final.mp4 is ready
 ```

@@ -16,6 +16,8 @@ from __future__ import annotations
 
 import base64
 import binascii
+import hashlib
+import json
 import shutil
 import subprocess
 import time
@@ -32,6 +34,8 @@ from pipeline.errors import StageError
 STAGE = "voice"
 API_URL = "https://api.elevenlabs.io/v1/text-to-speech/{voice_id}/with-timestamps"
 _TMP_DIR = "voice_tmp"  # scratch inside the project folder; removed on success
+_CACHE_DIR = "voice_cache"  # persistent per-scene audio cache; NOT removed
+VOICE_REPORT = "voice_report.json"  # stage-private usage record (chars sent)
 
 
 class TTSProvider(Protocol):
@@ -44,6 +48,12 @@ class TTSProvider(Protocol):
                           "character_start_times_seconds": [...],
                           "character_end_times_seconds": [...]}
         """
+        ...
+
+    def signature(self) -> str:
+        """Stable string of the settings that affect the output (voice id,
+        model, voice settings). Part of the cache key so changing the voice
+        or model invalidates cached audio."""
         ...
 
 
@@ -81,6 +91,17 @@ class ElevenLabsTTS:
         self.stability = stability
         self.similarity_boost = similarity_boost
         self.speed = speed
+
+    def signature(self) -> str:
+        # api_key deliberately excluded — it does not change the audio, and
+        # keeping it out avoids leaking a secret into cache filenames.
+        return json.dumps({
+            "voice_id": self.voice_id,
+            "model_id": self.model_id,
+            "stability": self.stability,
+            "similarity_boost": self.similarity_boost,
+            "speed": self.speed,
+        }, sort_keys=True)
 
     def synthesize(
         self, text: str, prev_text: str, next_text: str
@@ -178,6 +199,61 @@ def _spoken_text(display: str, overrides: dict[str, str]) -> str:
             )
         spoken_words.append(spoken)
     return " ".join(spoken_words)
+
+
+def scene_characters(
+    script: dict[str, Any], overrides: dict[str, str]
+) -> list[tuple[int, int]]:
+    """Billable characters per scene: the length of the exact spoken text
+    sent to ElevenLabs as `text`. previous_text/next_text conditioning is
+    NOT billed, so it is excluded. Reused by `run.py estimate` so the
+    prediction is the same string the stage actually sends — it can never
+    drift from what gets charged. Raises ContractError on a bad
+    pronunciation override (the same failure the voice stage would hit)."""
+    return [
+        (scene["id"], len(_spoken_text(scene["narration_ar"].strip(), overrides)))
+        for scene in script["scenes"]
+    ]
+
+
+# --------------------------------------------------------------------------
+# Per-scene audio cache (content-addressed; avoids re-billing unchanged scenes)
+# --------------------------------------------------------------------------
+
+def _cache_key(signature: str, text: str, prev_text: str,
+               next_text: str) -> str:
+    """Hash of everything that determines the TTS output. Same request ->
+    same key -> reuse the stored audio, no new API call. Neighbor text is
+    included because it conditions prosody, so editing one scene correctly
+    invalidates its neighbors (not the whole video)."""
+    payload = json.dumps(
+        {"sig": signature, "text": text, "prev": prev_text, "next": next_text},
+        ensure_ascii=False, sort_keys=True,
+    )
+    return hashlib.sha1(payload.encode("utf-8")).hexdigest()
+
+
+def _synthesize_cached(
+    provider: TTSProvider, cache_dir: Path, signature: str,
+    text: str, prev_text: str, next_text: str,
+) -> tuple[bytes, dict[str, Any], bool]:
+    """(audio, alignment, from_cache). A cache hit costs nothing; a miss
+    calls the provider and stores the result. To re-roll audio for identical
+    text, delete the voice_cache/ folder."""
+    key = _cache_key(signature, text, prev_text, next_text)
+    mp3_path = cache_dir / f"{key}.mp3"
+    meta_path = cache_dir / f"{key}.json"
+    if mp3_path.exists() and meta_path.exists():
+        try:
+            alignment = json.loads(meta_path.read_text(encoding="utf-8"))
+            return mp3_path.read_bytes(), alignment, True
+        except (ValueError, OSError):
+            pass  # corrupt/partial cache entry -> fall through and re-synthesize
+    audio, alignment = provider.synthesize(text, prev_text, next_text)
+    mp3_path.write_bytes(audio)
+    meta_path.write_text(json.dumps(alignment, ensure_ascii=False),
+                         encoding="utf-8")
+    return audio, alignment, False
 
 
 # --------------------------------------------------------------------------
@@ -300,13 +376,21 @@ def _synthesize_project(project: contract.Project, script: dict,
 
     tmp_dir = project.path(_TMP_DIR)
     tmp_dir.mkdir(exist_ok=True)
+    cache_dir = project.path(_CACHE_DIR)
+    cache_dir.mkdir(exist_ok=True)
+    signature = provider.signature()
+
     scene_files: list[Path] = []
     timing_scenes: list[dict[str, Any]] = []
+    billed = 0
     offset = 0.0
     for i, scene in enumerate(scenes):
         prev_text = spoken[i - 1] if i > 0 else ""
         next_text = spoken[i + 1] if i < len(scenes) - 1 else ""
-        audio, alignment = provider.synthesize(spoken[i], prev_text, next_text)
+        audio, alignment, from_cache = _synthesize_cached(
+            provider, cache_dir, signature, spoken[i], prev_text, next_text)
+        if not from_cache:
+            billed += len(spoken[i])  # only real API calls are billed
         scene_path = tmp_dir / f"scene_{scene['id']:03d}.mp3"
         scene_path.write_bytes(audio)
         words = _words_from_alignment(narrations[i], alignment, offset)
@@ -324,4 +408,16 @@ def _synthesize_project(project: contract.Project, script: dict,
     timing = {"total_seconds": round(offset, 3), "scenes": timing_scenes}
     contract.validate_timing(timing)
     project.write_json(contract.TIMING, timing)
+    # Record TTS usage (chars = ElevenLabs billing unit): total is the whole
+    # script; billed excludes scenes served from the cache this run, so spend
+    # is auditable after the fact and matches `run.py estimate` on a cold run.
+    project.write_json(VOICE_REPORT, {
+        "total_characters": sum(len(s) for s in spoken),
+        "billed_characters": billed,
+        "scenes": [{"id": sc["id"], "characters": len(sp)}
+                   for sc, sp in zip(scenes, spoken)],
+        "note": "billed characters = `text` only; previous_text/next_text "
+                "conditioning is not billed by ElevenLabs; cache hits are "
+                "excluded from billed_characters",
+    })
     shutil.rmtree(tmp_dir, ignore_errors=True)

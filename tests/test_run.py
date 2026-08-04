@@ -150,14 +150,46 @@ def test_process_default_force_is_false(project, recorders):
     assert all(c["force"] is False for c in recorders["calls"])
 
 
-def test_force_stage_forces_only_that_stage(project, recorders):
+def test_forced_stages_transitive_closure():
+    assert runner._forced_stages(None) == set()
+    assert runner._forced_stages("render") == {"render", "review"}
+    assert runner._forced_stages("footage") == {"footage", "render", "review"}
+    assert runner._forced_stages("voice") == {
+        "voice", "captions", "render", "review", "publish"}
+    assert runner._forced_stages("script") == {
+        "script", "voice", "footage", "captions", "render", "review", "publish"}
+
+
+def test_force_stage_cascades_to_dependent_stages(project, recorders):
+    """Forcing render must also force its dependent (review) — a fresh render
+    the human approved needs a fresh review — but nothing upstream."""
     project.approve_gate(contract.GATE1_APPROVED)
     project.approve_gate(contract.GATE2_APPROVED)
     rc = runner.main(["process", str(project.dir), "--force-stage", "render"])
     assert rc == 0
     forces = {c["stage"]: c["force"] for c in recorders["calls"]}
     assert forces["render"] is True
-    assert all(v is False for s, v in forces.items() if s != "render")
+    assert forces["review"] is True          # dependent cascaded
+    assert forces["ingest"] is False
+    assert forces["voice"] is False
+    assert forces["footage"] is False
+    assert forces["captions"] is False       # captions do not depend on render
+
+
+def test_force_stage_voice_cascades_to_render_not_footage(project, recorders):
+    """The narration-edit loop: forcing voice rebuilds captions/render/review
+    (they consume timing), but NOT footage (independent of timing)."""
+    project.approve_gate(contract.GATE1_APPROVED)
+    project.approve_gate(contract.GATE2_APPROVED)
+    runner.main(["process", str(project.dir), "--force-stage", "voice"])
+    forces = {c["stage"]: c["force"] for c in recorders["calls"]}
+    assert forces["voice"] is True
+    assert forces["captions"] is True
+    assert forces["render"] is True
+    assert forces["review"] is True
+    assert forces["footage"] is False        # clips are kept, not re-downloaded
+    assert forces["script"] is False
+    assert forces["ingest"] is False
 
 
 def test_process_stage_error_exits_one(project, recorders, capsys):
@@ -434,6 +466,123 @@ def test_batch_missing_file_exits_one(tmp_path, capsys):
     rc = runner.main(["batch", str(tmp_path / "nope.txt")])
     assert rc == 1
     assert "not found" in capsys.readouterr().out
+
+
+# --------------------------------------------------------------------------
+# estimate (pre-spend character/cost prediction; real voice module)
+# --------------------------------------------------------------------------
+
+def test_estimate_reports_total_characters(project, capsys):
+    project.write_json(contract.SCRIPT, VALID_SCRIPT)
+    rc = runner.main(["estimate", str(project.dir)])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "estimate for" in out
+    total = len("نص المشهد الأول") + len("نص المشهد الثاني")
+    assert str(total) in out
+
+
+def test_estimate_without_script_exits_one(project, capsys):
+    rc = runner.main(["estimate", str(project.dir)])  # only source_url.txt
+    assert rc == 1
+    assert "not found" in capsys.readouterr().out
+
+
+def test_estimate_shows_cost_when_rate_configured(project, capsys):
+    project.write_json(contract.SCRIPT, VALID_SCRIPT)
+    project.write_text(contract.PROJECT_CONFIG, "voice:\n  usd_per_1k_chars: 0.3\n")
+    rc = runner.main(["estimate", str(project.dir)])
+    assert rc == 0
+    assert "estimated cost: $" in capsys.readouterr().out
+
+
+# --------------------------------------------------------------------------
+# timing safety net: drift surfacing (real verify_timing) + repair-timing
+# --------------------------------------------------------------------------
+
+_DRIFTED_TIMING = {
+    "total_seconds": 6.0,
+    "scenes": [
+        {"id": 1, "start": 0.0, "end": 2.0,
+         "words": [{"word": "أ", "start": 0.0, "end": 1.9}]},
+        {"id": 2, "start": 4.0, "end": 6.0,  # 2s gap after scene 1
+         "words": [{"word": "ب", "start": 4.0, "end": 5.9}]},
+    ],
+}
+_CLEAN_TIMING = {
+    "total_seconds": 4.0,
+    "scenes": [
+        {"id": 1, "start": 0.0, "end": 2.0,
+         "words": [{"word": "أ", "start": 0.0, "end": 1.9}]},
+        {"id": 2, "start": 2.4, "end": 4.0,
+         "words": [{"word": "ب", "start": 2.4, "end": 3.9}]},
+    ],
+}
+
+
+def test_surface_timing_drift_warns_and_points_to_repair(project, capsys):
+    project.write_json(contract.TIMING, _DRIFTED_TIMING)
+    runner._surface_timing_drift(project)
+    out = capsys.readouterr().out
+    assert "drift warning" in out
+    assert "repair-timing" in out
+
+
+def test_surface_timing_drift_silent_when_clean(project, capsys):
+    project.write_json(contract.TIMING, _CLEAN_TIMING)
+    runner._surface_timing_drift(project)
+    assert "drift" not in capsys.readouterr().out
+
+
+def test_surface_timing_drift_noop_without_timing(project, capsys):
+    runner._surface_timing_drift(project)  # only source_url.txt on disk
+    assert capsys.readouterr().out == ""
+
+
+def _install_fake_align(monkeypatch, *, run=None, verify=lambda p: []):
+    fake = types.ModuleType("pipeline.align")
+    fake.run = run
+    fake.verify_timing = verify
+    monkeypatch.setitem(sys.modules, "pipeline.align", fake)
+    return fake
+
+
+def test_repair_timing_rebuilds_forces_downstream_and_revokes_gate2(
+        project, recorders, monkeypatch):
+    project.write_json(contract.SCRIPT, VALID_SCRIPT)
+    project.path(contract.VOICEOVER).write_bytes(b"mp3")
+    project.approve_gate(contract.GATE1_APPROVED)
+    project.approve_gate(contract.GATE2_APPROVED)
+
+    ran = {"n": 0}
+
+    def fake_align_run(p, cfg, env, *, force=False):
+        ran["n"] += 1
+        assert force is True  # repair always rebuilds
+        p.write_json(contract.TIMING, {
+            "total_seconds": 1.0,
+            "scenes": [{"id": 1, "start": 0.0, "end": 1.0, "words": []}],
+        })
+
+    _install_fake_align(monkeypatch, run=fake_align_run)
+    rc = runner.main(["repair-timing", str(project.dir)])
+    assert rc == 0
+    assert ran["n"] == 1
+    assert not project.gate_approved(contract.GATE2_APPROVED)  # revoked
+    assert project.gate_approved(contract.GATE1_APPROVED)      # script gate kept
+    assert stages_called(recorders) == ["captions", "render", "review"]
+    assert all(c["force"] is True for c in recorders["calls"])
+
+
+def test_repair_timing_reports_align_failure(project, recorders, monkeypatch, capsys):
+    def boom(p, cfg, env, *, force=False):
+        raise StageError("align", "whisper heard nothing")
+
+    _install_fake_align(monkeypatch, run=boom)
+    rc = runner.main(["repair-timing", str(project.dir)])
+    assert rc == 1
+    assert "whisper heard nothing" in capsys.readouterr().out
+    assert stages_called(recorders) == []  # nothing re-rendered on failure
 
 
 # --------------------------------------------------------------------------

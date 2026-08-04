@@ -5,6 +5,7 @@ run() tests and exercised for real on tiny lavfi mp3s in one test."""
 import base64
 import copy
 import json
+import shutil
 import subprocess
 
 import pytest
@@ -66,6 +67,9 @@ def _fake_alignment(text):
 class FakeTTS:
     def __init__(self):
         self.calls = []
+
+    def signature(self):
+        return "fake-provider-sig"
 
     def synthesize(self, text, prev_text, next_text):
         self.calls.append((text, prev_text, next_text))
@@ -145,6 +149,107 @@ def test_run_missing_script_raises_contract_error(tmp_path, patched):
         voice.run(Project(dir=d), CFG, ENV)
 
 
+# -- usage accounting (scene_characters + voice_report) ----------------------
+
+def test_scene_characters_counts_spoken_text(tmp_path):
+    project = _make_project(tmp_path)
+    per_scene = voice.scene_characters(project.script(), {})
+    assert [sid for sid, _ in per_scene] == [1, 2]
+    assert dict(per_scene)[1] == len("مرحبا بكم في المصنع")
+    assert dict(per_scene)[2] == len("هذه خوارزمية، مذهلة حقا")
+
+
+def test_scene_characters_reflects_spoken_not_display(tmp_path):
+    project = _make_project(tmp_path)
+    plain = dict(voice.scene_characters(project.script(), {}))
+    # A shorter respelling changes what is BILLED (spoken), scene 2 only.
+    shortened = dict(voice.scene_characters(project.script(), {"خوارزمية": "خ"}))
+    assert shortened[2] < plain[2]
+    assert shortened[1] == plain[1]
+
+
+def test_scene_characters_bad_override_raises(tmp_path):
+    project = _make_project(tmp_path)
+    with pytest.raises(ContractError, match="one word"):
+        voice.scene_characters(project.script(), {"خوارزمية": "خوار زمية"})
+
+
+def test_run_writes_voice_report_with_char_counts(tmp_path, patched):
+    project = _make_project(tmp_path)
+    voice.run(project, CFG, ENV)
+    report = project.read_json(voice.VOICE_REPORT)
+    total = len("مرحبا بكم في المصنع") + len("هذه خوارزمية، مذهلة حقا")
+    assert report["total_characters"] == total
+    assert report["billed_characters"] == total  # cold run -> everything billed
+    assert [s["id"] for s in report["scenes"]] == [1, 2]
+    assert report["scenes"][0]["characters"] == len("مرحبا بكم في المصنع")
+
+
+# -- per-scene audio cache ---------------------------------------------------
+
+def test_scene_audio_is_cached_across_reruns(tmp_path, patched):
+    project = _make_project(tmp_path)
+    voice.run(project, CFG, ENV)
+    assert len(patched.calls) == 2
+
+    # wipe the OUTPUTS but keep voice_cache/, then rebuild
+    project.path(contract.VOICEOVER).unlink()
+    project.path(contract.TIMING).unlink()
+    voice.run(project, CFG, ENV)
+    assert len(patched.calls) == 2          # no new API calls — served from cache
+    assert project.has(contract.VOICEOVER)  # output still rebuilt
+    assert project.read_json(voice.VOICE_REPORT)["billed_characters"] == 0
+
+
+def test_force_reuses_cache_instead_of_rebilling(tmp_path, patched):
+    project = _make_project(tmp_path)
+    voice.run(project, CFG, ENV)
+    n = len(patched.calls)
+    assert n == 2
+    voice.run(project, CFG, ENV)            # outputs exist -> early return
+    assert len(patched.calls) == n
+    # force rebuilds outputs but reuses cached scene audio (identical request):
+    # no new API calls, so no re-billing.
+    voice.run(project, CFG, ENV, force=True)
+    assert len(patched.calls) == n
+    assert project.has(contract.VOICEOVER) and project.has(contract.TIMING)
+
+
+def test_clearing_cache_forces_fresh_synthesis(tmp_path, patched):
+    project = _make_project(tmp_path)
+    voice.run(project, CFG, ENV)
+    assert len(patched.calls) == 2
+    shutil.rmtree(project.path(voice._CACHE_DIR))
+    voice.run(project, CFG, ENV, force=True)
+    assert len(patched.calls) == 4  # cache gone -> both scenes re-synthesized
+
+
+def test_editing_last_scene_reuses_unaffected_scene(tmp_path, patched):
+    script = copy.deepcopy(SCRIPT_DATA)
+    script["scenes"].append({
+        "id": 3, "narration_ar": "المشهد الثالث هنا",
+        "keywords": [["desk scene"]], "mood": "calm", "target_seconds": 8,
+    })
+    project = _make_project(tmp_path, script)
+    voice.run(project, CFG, ENV)
+    assert len(patched.calls) == 3
+
+    edited = project.read_json(contract.SCRIPT)
+    edited["scenes"][2]["narration_ar"] = "نص جديد مختلف للمشهد الثالث"
+    project.write_json(contract.SCRIPT, edited)
+    project.path(contract.VOICEOVER).unlink()
+    project.path(contract.TIMING).unlink()
+    voice.run(project, CFG, ENV)
+
+    # scene 1 (text + neighbors unchanged) reused; scene 2's next_text changed
+    # and scene 3's text changed, so only those two are re-synthesized.
+    new_calls = patched.calls[3:]
+    assert len(new_calls) == 2
+    assert "نص جديد مختلف للمشهد الثالث" in {c[0] for c in new_calls}
+    assert project.read_json(voice.VOICE_REPORT)["billed_characters"] == (
+        len("هذه خوارزمية، مذهلة حقا") + len("نص جديد مختلف للمشهد الثالث"))
+
+
 # -- pronunciation overrides -------------------------------------------------
 
 def test_overrides_change_spoken_text_but_keep_display_words(tmp_path, patched):
@@ -169,19 +274,6 @@ def test_multiword_respelling_raises_contract_error(tmp_path, patched):
 
 
 # -- idempotency --------------------------------------------------------------
-
-def test_idempotent_skip_and_force_rerun(tmp_path, patched):
-    project = _make_project(tmp_path)
-    voice.run(project, CFG, ENV)
-    n = len(patched.calls)
-    assert n == 2
-
-    voice.run(project, CFG, ENV)            # outputs exist -> early return
-    assert len(patched.calls) == n
-
-    voice.run(project, CFG, ENV, force=True)
-    assert len(patched.calls) == 2 * n
-
 
 def test_skip_needs_no_config_or_key(tmp_path):
     project = _make_project(tmp_path)

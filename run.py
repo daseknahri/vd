@@ -63,6 +63,38 @@ PIPELINE: list[tuple[str, Any]] = [
 
 GATE_MARKERS = {1: contract.GATE1_APPROVED, 2: contract.GATE2_APPROVED}
 
+# Data dependencies: forcing a stage must also re-run every stage that
+# consumes its output, or a forced regeneration leaves a stale downstream
+# artifact (new voiceover + old captions/render). This is the TRUE dependency
+# graph, NOT the linear PIPELINE order — footage consumes script keywords, not
+# timing, so forcing `voice` must never re-download clips. Each key lists only
+# its DIRECT dependents; `_forced_stages` takes the transitive closure.
+STAGE_DEPENDENTS: dict[str, list[str]] = {
+    "ingest":   ["script"],   # transcript feeds the (human) script step
+    "script":   ["voice", "footage", "captions", "render", "review", "publish"],
+    "voice":    ["captions", "render", "review", "publish"],  # voiceover + timing
+    "footage":  ["render", "review"],
+    "captions": ["render", "review"],
+    "render":   ["review"],
+    "review":   [],
+    "publish":  [],
+}
+
+
+def _forced_stages(force_stage: str | None) -> set[str]:
+    """The forced stage plus everything downstream that depends on it
+    (transitive closure over STAGE_DEPENDENTS). Empty when nothing is forced."""
+    if force_stage is None:
+        return set()
+    forced = {force_stage}
+    stack = [force_stage]
+    while stack:
+        for dep in STAGE_DEPENDENTS.get(stack.pop(), []):
+            if dep not in forced:
+                forced.add(dep)
+                stack.append(dep)
+    return forced
+
 
 def _effective_pipeline(project: Project) -> list[tuple[str, Any]]:
     """The run order for this project.
@@ -136,6 +168,29 @@ def _revoke_downstream_gates(project: Project, stage: str) -> None:
                     f"by force; review the new output before approving again")
 
 
+def _surface_timing_drift(project: Project) -> None:
+    """After a real voice run, flag caption-sync risk. Non-fatal — reports
+    only. verify_timing is pure (no whisper, no cost); the actual repair is
+    the explicit `run.py repair-timing`. We never silently swap ElevenLabs'
+    ground-truth timestamps for a whisper guess."""
+    if not project.has(contract.TIMING):
+        return  # voice hasn't produced timing (e.g. faked in tests) — nothing to check
+    align = importlib.import_module("pipeline.align")
+    try:
+        warnings = align.verify_timing(project)
+    except ContractError as exc:
+        say(f"[timing] timing.json unreadable: {exc}")
+        say(f'[timing] rebuild it with: python run.py repair-timing "{project.dir}"')
+        return
+    if warnings:
+        say(f"[timing] {len(warnings)} drift warning(s) — captions may desync:")
+        for w in warnings[:3]:
+            say(f"  - {w}")
+        if len(warnings) > 3:
+            say(f"  ... and {len(warnings) - 3} more")
+        say(f'[timing] rebuild from the audio with: python run.py repair-timing "{project.dir}"')
+
+
 def _run_stages(project: Project, force_stage: str | None = None) -> Status:
     """Run the pipeline for one project; stop at unapproved gates.
 
@@ -146,6 +201,7 @@ def _run_stages(project: Project, force_stage: str | None = None) -> Status:
     try:
         cfg = contract.load_config(project.dir)
         env = contract.load_env()
+        forced = _forced_stages(force_stage)
         if force_stage is not None:
             _revoke_downstream_gates(project, force_stage)
         for kind, value in _effective_pipeline(project):
@@ -160,9 +216,11 @@ def _run_stages(project: Project, force_stage: str | None = None) -> Status:
                 continue
             stage = str(value)
             run_fn = _load_stage(stage)
-            say(f"[{stage}] running" + (" (forced)" if stage == force_stage else ""))
-            run_fn(project, cfg, env, force=(stage == force_stage))
+            say(f"[{stage}] running" + (" (forced)" if stage in forced else ""))
+            run_fn(project, cfg, env, force=(stage in forced))
             status.last_completed = stage
+            if stage == "voice":
+                _surface_timing_drift(project)
         say("all stages complete.")
     except StageError as exc:
         status.error = str(exc)
@@ -327,6 +385,116 @@ def cmd_redo(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_estimate(args: argparse.Namespace) -> int:
+    """Predict ElevenLabs character usage (and $ if a rate is configured)
+    for a project's script, BEFORE spending. Reads script.json +
+    pronunciation.json only — no network, no API key. Run it at gate 1,
+    before approving, to know the cost of the voice stage."""
+    from pipeline import voice
+
+    project = _open_project(args.project_dir)
+    if project is None:
+        return 1
+    if not project.has(contract.SCRIPT):
+        say(f"error: {contract.SCRIPT} not found — write the script first "
+            f"(video-script skill), then estimate")
+        return 1
+    try:
+        script = project.script()
+        overrides = project.pronunciation_overrides()
+        per_scene = voice.scene_characters(script, overrides)
+        cfg = contract.load_config(project.dir)
+    except ContractError as exc:
+        say(f"contract error: {exc}")
+        return 1
+
+    total = sum(chars for _, chars in per_scene)
+    say(f"estimate for {project.dir.name}")
+    say(f"{'scene':<8}  characters")
+    say(f"{'-' * 8}  {'-' * 10}")
+    for sid, chars in per_scene:
+        say(f"{sid:<8}  {chars}")
+    say(f"{'total':<8}  {total}")
+    say("(billed = `text` only; previous/next conditioning is not billed)")
+    rate = (cfg.get("voice") or {}).get("usd_per_1k_chars")
+    if isinstance(rate, (int, float)) and rate > 0:
+        say(f"estimated cost: ${total / 1000 * rate:.4f} "
+            f"at ${rate}/1k chars (voice.usd_per_1k_chars)")
+    else:
+        say("set voice.usd_per_1k_chars in config.yaml for a $ estimate")
+    return 0
+
+
+def cmd_doctor(args: argparse.Namespace) -> int:
+    """Preflight: is this checkout ready to make videos? Never hits the
+    network. Exit 1 only when a toolchain requirement is broken; missing
+    API keys / music are WARNs (legitimately absent before go-live)."""
+    from pipeline import doctor
+
+    config_error: str | None = None
+    cfg: dict | None = None
+    try:
+        cfg = contract.load_config(
+            Path(args.project_dir) if args.project_dir else None)
+    except ContractError as exc:
+        config_error = str(exc)
+    env = contract.load_env()
+    checks = doctor.run_checks(cfg, env, config_error)
+
+    labels = {doctor.OK: "[ OK ]", doctor.WARN: "[WARN]", doctor.FAIL: "[FAIL]"}
+    name_w = max(len(c.name) for c in checks)
+    say("Video Factory - preflight check")
+    for required, header in ((True, "toolchain (required):"),
+                             (False, "go-live (before your first real run):")):
+        say()
+        say(header)
+        for c in (c for c in checks if c.required is required):
+            say(f"  {labels[c.status]} {c.name:<{name_w}}  {c.detail}")
+
+    say()
+    if doctor.has_failures(checks):
+        n = sum(1 for c in checks if c.status == doctor.FAIL)
+        say(f"result: {n} toolchain check(s) FAILED - fix before running")
+        return 1
+    todo = sum(1 for c in checks if c.status == doctor.WARN)
+    say(f"result: toolchain OK - {todo} item(s) to configure before going live"
+        if todo else "result: all checks passed - ready to make videos")
+    return 0
+
+
+def cmd_repair_timing(args: argparse.Namespace) -> int:
+    """Rebuild timing.json from the voiceover audio via local whisper
+    alignment (pipeline/align.py), then re-render captions/render/review.
+
+    For when ElevenLabs' per-character timing is bad and captions desync.
+    Like `redo`, it revokes gate 2 — the render the human approved is being
+    replaced, so it must be reviewed again (CLAUDE.md rule 2)."""
+    project = _open_project(args.project_dir)
+    if project is None:
+        return 1
+    align = importlib.import_module("pipeline.align")
+    try:
+        cfg = contract.load_config(project.dir)
+        env = contract.load_env()
+        say("[align] rebuilding timing.json from the voiceover (whisper)")
+        align.run(project, cfg, env, force=True)
+        for w in align.verify_timing(project):
+            say(f"[timing] {w}")
+        # The re-timed render replaces what the human approved at gate 2.
+        if project.gate_approved(contract.GATE2_APPROVED):
+            project.revoke_gate(contract.GATE2_APPROVED)
+            say("[gate 2] approval revoked - the re-timed render needs review")
+        for stage in ("captions", "render", "review"):
+            say(f"[{stage}] running (forced)")
+            _load_stage(stage)(project, cfg, env, force=True)
+    except (StageError, ContractError) as exc:
+        say(f"error: {exc}")
+        return 1
+    say("repair complete - re-check the contact sheet before approving gate 2:")
+    say(f"  {project.path(contract.CONTACT_SHEET)}")
+    return 0
+
+
 def cmd_batch(args: argparse.Namespace) -> int:
     urls_file = Path(args.urls_file)
     if not urls_file.is_file():
@@ -402,7 +570,9 @@ def build_parser() -> argparse.ArgumentParser:
         "--force-stage",
         choices=list(STAGE_MODULES),
         default=None,
-        help="re-run this one stage even if its outputs exist",
+        help="re-run this stage AND every stage that depends on its output "
+             "(e.g. voice also rebuilds captions/render/review), even if "
+             "their outputs exist",
     )
     p.set_defaults(func=cmd_process)
 
@@ -420,6 +590,25 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("urls_file")
     p.add_argument("--projects-root", type=Path, default=None, help=argparse.SUPPRESS)
     p.set_defaults(func=cmd_batch)
+
+    p = sub.add_parser(
+        "doctor",
+        help="check the toolchain + config are ready to make videos")
+    p.add_argument("project_dir", nargs="?", default=None,
+                   help="optional project folder (applies its project.yaml)")
+    p.set_defaults(func=cmd_doctor)
+
+    p = sub.add_parser(
+        "estimate",
+        help="predict ElevenLabs character usage/cost before running voice")
+    p.add_argument("project_dir")
+    p.set_defaults(func=cmd_estimate)
+
+    p = sub.add_parser(
+        "repair-timing",
+        help="rebuild timing.json from the voiceover (whisper) and re-render")
+    p.add_argument("project_dir")
+    p.set_defaults(func=cmd_repair_timing)
 
     return parser
 

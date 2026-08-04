@@ -13,10 +13,17 @@ folder; it is the engineering contract. Companion docs:
 - **.claude/skills/video-script/SKILL.md** — the skill that writes each
   Arabic script (the `script` stage; runs inside Claude Code).
 
-## Current status (2026-07-10)
+## Current status (2026-08-02)
 
 - **Built and green:** all 8 stages + orchestrator + the video-script
-  skill. `pytest tests/ -q` = **158 passing**, no network or keys needed.
+  skill. `pytest tests/ -q` = **193 passing**, no network or keys needed.
+- **Operator hardening (2026-08-02):** four offline commands added —
+  `doctor` (preflight: toolchain + go-live config), `estimate` (predict
+  ElevenLabs characters/$ before spending), `repair-timing` (rebuild
+  `timing.json` from the voiceover via `align` when TTS timing drifts), and
+  a content-addressed per-scene TTS cache (`voice_cache/`) so re-running
+  voice only re-bills changed scenes. `process` now auto-runs `verify_timing`
+  after voice and flags caption-sync drift.
 - **Verified against reality:** `render` (real ffmpeg; RTL captions checked
   on actual rendered frames) and `ingest` (real yt-dlp + faster-whisper on
   a live YouTube URL, 2026-07-10).
@@ -39,7 +46,10 @@ pytest, then act on the specific request.
   `.venv\Scripts\python.exe tests\make_sample.py` → inspect
   `projects\sample-demo\final.mp4`.
 - Operate for real: see **README.md**. CLI verbs (`python run.py <verb>`):
-  `new | new-topic | process | approve | redo | batch`.
+  `new | new-topic | process | approve | redo | batch`, plus operator aids
+  `doctor` (readiness check), `estimate <project>` (TTS cost before gate 1),
+  `repair-timing <project>` (re-time from the voiceover when captions
+  desync). `doctor` never hits the network; run it first on a fresh machine.
 - **`run.py process` exits with code 1 whenever it stops at a gate**
   (script-not-written, gate 1, gate 2). That is the *designed pause*, not a
   failure — read the printed message before treating it as an error.
@@ -111,6 +121,12 @@ def run(project: Project, cfg: dict, env: dict, *, force: bool = False) -> None
 - No stage adds parameters to this signature (the orchestrator calls them
   uniformly). `redo` targets specific scenes by *deleting their clips* and
   re-running the standard stages — not via a `scene_ids` kwarg.
+- `--force-stage X` re-runs X **and every stage that consumes its output**
+  (the data-dependency closure in `run.py` `STAGE_DEPENDENTS`, not the linear
+  order), so a forced regen never leaves a stale downstream artifact — e.g.
+  forcing `voice` rebuilds captions/render/review but leaves `footage`
+  (independent of timing) alone. This is the narration-edit loop: fix a
+  scene's `narration_ar`, then `process --force-stage voice`.
 - `Project`, file-name constants, validators, `ffmpeg_path()`, config/env
   loaders all come from `pipeline/contract.py`. Import from there only;
   never hardcode project file names or ffmpeg paths. Cross-stage file names
@@ -168,6 +184,10 @@ def run(project: Project, cfg: dict, env: dict, *, force: bool = False) -> None
 - Scene clip files: `clips/scene_001.mp4` (`scene_{id:03d}.mp4`).
 - Caption frames: `captions/cap_0001.png` + `captions/manifest.json`
   (each frame: png, start, end — seconds, absolute in the final timeline).
-- Stage reports (footage gaps, render logs): `<stage>_report.json` in the
-  project folder.
+- Stage reports (footage gaps, render logs, TTS chars): `<stage>_report.json`
+  in the project folder (`voice_report.json` records total vs billed chars).
+- `voice_cache/` — content-addressed per-scene TTS audio (`<sha1>.mp3` +
+  `.json`), keyed on voice settings + spoken + neighbor text. Reused across
+  re-runs so unchanged scenes are never re-billed; delete the folder to
+  force fresh audio for identical text.
 - Human gate markers: `.gate1_script_approved`, `.gate2_review_approved`.
