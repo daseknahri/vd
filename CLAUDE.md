@@ -12,6 +12,9 @@ folder; it is the engineering contract. Companion docs:
 - **PLAN.md** — the product design and phased rationale.
 - **.claude/skills/video-script/SKILL.md** — the skill that writes each
   Arabic script (the `script` stage; runs inside Claude Code).
+- **DUB.md** — the *separate* dub-and-subtitle path (`scripts/dub_*.py`):
+  keeps the source picture, overlays Arabic voice + burned captions.
+  Deliberately breaks Hard Rule 1 by design; not part of `run.py process`.
 
 ## Current status (2026-08-02)
 
