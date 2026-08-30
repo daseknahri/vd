@@ -2,6 +2,14 @@
 
 A self-hosted pipeline that turns a source video URL into an original, Arabic, faceless video ready to publish. Orchestrated by Claude Code. Fixed-cost-first: the only recurring variable cost is text-to-speech.
 
+> **As-built note (2026-08-30):** this is the original design doc; a few choices
+> shipped differently. Word-level alignment uses **faster-whisper**, not WhisperX
+> (`pipeline/align.py`). Captions render as **Pillow + libraqm PNGs**, never
+> libass/`captions.ass` (which is exported only as a portable artifact) — see
+> CLAUDE.md hard rule 3. A second **dub** workflow (keep-the-source Arabic
+> re-voice) was added later — see DUB.md — which the "original, faceless" framing
+> above does not cover.
+
 ---
 
 ## 1. Guiding principles

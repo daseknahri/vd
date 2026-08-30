@@ -26,11 +26,18 @@ So a fresh clone has the fonts but no keys, no venv, no music.
 
 - **Python 3.12** (built and verified with 3.12.6).
 - **ffmpeg + ffprobe** — any recent build with `libx264`, `aac`, and the
-  standard filters (`overlay`, `concat`, `sidechaincompress`, `loudnorm`).
+  standard filters (`overlay`, `concat`, `sidechaincompress`, `loudnorm`,
+  and for the dub `drawbox` + `delogo`).
   You do **not** need a special libass/HarfBuzz build: Arabic captions are
   rendered with Pillow, never libass (that is the entire reason
   `pipeline/captions.py` exists — see CLAUDE.md hard rule 3).
 - **git**.
+- **Node.js** (recommended, for YouTube sources) — yt-dlp uses a JS runtime
+  to decipher YouTube signatures. **YouTube sources note:** the default
+  yt-dlp client now 403s on many videos (signature / PO-token wall). `ingest.py`
+  automatically falls back to `player_client=android` (a ~360p progressive
+  stream); for >360p HD, pass cookies to yt-dlp (`--cookies-from-browser
+  chrome` with the browser closed, or `--cookies file.txt`).
 
 ## 1. Clone + virtualenv + deps
 
@@ -105,13 +112,21 @@ cp .env.example .env      # then fill ELEVENLABS_API_KEY, PEXELS_API_KEY
 # drop one royalty-free .mp3 into assets/music/   (optional)
 ```
 
-Never commit `.env`, and never paste keys into a chat — put them in the file.
+Never commit `.env`, and never paste keys into a chat — put them in the file
+(`.env.example` is a template and must always keep its values BLANK).
 Without keys you can still run the script stage and the no-keys sample render.
+
+**ElevenLabs key scopes + voice_id.** A key can be *scope-limited*: a
+`text_to_speech`-only key runs the whole voice/dub pipeline, but the ElevenLabs
+**MCP's voice-browsing** and the `/v1/voices`/`/v1/user` endpoints need
+`voices_read` / `user_read` (they return 401 `missing_permissions` otherwise).
+If you can't list voices via API, pick a known premade `voice_id` (e.g. George
+`JBFqnCBsd6RMkjVDRZzb`) and set it in `config.yaml` or a project's `project.yaml`.
 
 ## 5. Verify the install
 
 ```bash
-# a) unit suite — no keys, no network (expect ~164 passing)
+# a) unit suite — no keys, no network (expect all passing; 226 at time of writing)
 python -m pytest tests/ -q
 
 # b) no-keys end-to-end render (real ffmpeg on a synthetic project)

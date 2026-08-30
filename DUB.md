@@ -36,29 +36,42 @@ dub_segment → dub_refine_segments → [edit dub_translations.json]
   → dub_voice → captions stage → dub_render
 ```
 
+**Fastest path — the dispatcher.** `run.py dub <project-dir>` advances the
+project to its next step from what's on disk: it runs the automatable steps
+(segment, build, captions, voice-after-approval, render) and STOPS with
+instructions at the manual ones (write translations, approve). It never folds
+the dub into `run.py process` — `process` refuses to run on a dub project.
+
+```bash
+.venv\Scripts\python.exe run.py dub projects\<slug>          # run until the next manual step
+.venv\Scripts\python.exe run.py dub-approve projects\<slug>  # record the translation-review approval
+.venv\Scripts\python.exe run.py status projects\<slug>       # which outputs exist
+```
+
+The individual scripts below are the granular manual path (what the dispatcher
+calls); use them to re-run a single step.
+
 | Step | Command | Reads → Writes |
 |------|---------|----------------|
-| 1. Segment | `scripts\dub_segment.py <slug>` | `source.mp4` → `dub_segments.json` (whisper word-timing, story window, caption-sized EN sentences) |
-| 1b. Refine | `scripts\dub_refine_segments.py <slug> <first> <last>` | merges whisper fragments into whole sentences, trims to story window `[first..last]`, renumbers |
-| — Translate | *(hand-edit)* `dub_translations.json` | one faithful Arabic (MSA) line per segment id |
-| 2. Build script | `scripts\dub_build_script.py <slug>` | `dub_segments.json` + `dub_translations.json` → `script.json` (each scene's `target_seconds` = its source-video slot) |
-| — Review gate | `scripts\dub_review.py <slug>` | `script.json` → `dub_review.html` (EN↔AR table + ElevenLabs char/cost estimate). **Vet before spending.** |
-| 3. Voice | `scripts\dub_voice.py <slug> [--force]` | `script.json` → `voiceover.mp3` + `timing.json`. Places each Arabic clip at its **source timestamp**, atempo-fits into the gap ahead (cap ~1.30×), only pushes later scenes when the cap isn't enough. |
-| 4. Captions | run the normal captions stage | `script.json` + `timing.json` → `captions/` PNGs + manifest |
-| 5. Render | `scripts\dub_render.py <slug> [--force]` | source (muted, scaled/padded to canvas) + `voiceover.mp3` + burned captions → `final.mp4` |
+| 1. Segment | `scripts\dub_segment.py <slug> [--marker "phrase"]` | `source.mp4` → `dub_segments.json` (whisper word-timing, story window, caption-sized EN sentences). Story-end marker: `--marker` or `project.yaml dub.story_end_marker`; warns loudly if it doesn't match. |
+| 1b. Refine | `scripts\dub_refine_segments.py <slug> <first> <last>` | `dub_segments.json` → `dub_segments.refined.json` (**non-destructive** — raw kept; downstream prefers the refined file). Merges fragments into whole sentences over the story id-range `[first..last]`. |
+| — Translate | *(hand-edit)* `dub_translations.json` | one faithful Arabic (MSA) line per segment id, **plus** a `post` object (title/description/hashtags) and a `source_url` (or add `source_url.txt`) — required; nothing about a specific video is hardcoded. |
+| 2. Build script | `scripts\dub_build_script.py <slug>` | segments + `dub_translations.json` → `script.json` (each scene's `target_seconds` = its source-video slot; `meta.workflow="dub"`) |
+| — Review gate | `scripts\dub_review.py <slug>` | `script.json` → `dub_review.html` (EN↔AR table + ElevenLabs char/cost estimate, rate from config). **Vet before spending, then `run.py dub-approve`.** |
+| 3. Voice | `scripts\dub_voice.py <slug> [--force]` | `script.json` → `voiceover.mp3` + `timing.json`. Places each Arabic clip at its **source timestamp**, atempo-fits into the gap ahead (cap ~1.30×), pushes later scenes only past the cap. **Refuses to spend without the `.dub_translation_approved` marker** (`run.py dub-approve`). |
+| 4. Captions | `run.py dub <project-dir>` runs it, or call `pipeline.captions.run(project, cfg, env)` | `script.json` + `timing.json` → `captions/` PNGs + manifest (Pillow+raqm) |
+| 5. Render | `scripts\dub_render.py <slug> [--force]` | source (muted, scaled/padded, subtitles covered, watermark erased) + `voiceover.mp3` + burned captions → `final.mp4` |
 
-Example (full):
+Example (granular, `romeo-juliet-dub`):
 
 ```bash
 .venv\Scripts\python.exe scripts\dub_segment.py romeo-juliet-dub
 .venv\Scripts\python.exe scripts\dub_refine_segments.py romeo-juliet-dub 2 56
-# edit projects\romeo-juliet-dub\dub_translations.json
+# edit projects\romeo-juliet-dub\dub_translations.json (Arabic + post + source_url)
 .venv\Scripts\python.exe scripts\dub_build_script.py romeo-juliet-dub
 .venv\Scripts\python.exe scripts\dub_review.py romeo-juliet-dub
-# ...approve dub_review.html...
-.venv\Scripts\python.exe scripts\dub_voice.py romeo-juliet-dub
-# ...run captions stage...
-.venv\Scripts\python.exe scripts\dub_render.py romeo-juliet-dub
+.venv\Scripts\python.exe run.py dub-approve projects\romeo-juliet-dub   # after vetting dub_review.html
+.venv\Scripts\python.exe run.py dub projects\romeo-juliet-dub           # voice -> captions -> render
 ```
 
 ## Zero-cost dry run
@@ -88,9 +101,14 @@ source cleanup:
   watermark. Note: `delogo` leaves a faint smudge on textured backgrounds —
   acceptable, not perfect.
 
-`projects/` is gitignored, so these per-project files do **not** sync via git.
-Recreate `project.yaml`, `dub_translations.json`, and `source.mp4` on the other
-machine (or copy the project folder manually).
+Most of `projects/` is gitignored, but the small TEXT inputs a dub needs to be
+rebuilt **are** tracked (see the `.gitignore` whitelist): `project.yaml`,
+`dub_translations.json`, `dub_segments.json` / `.refined.json`, and
+`source_url.txt`. So on a fresh clone you only re-supply the media —
+`source.mp4` (re-download; see below) — and re-run from `dub_build_script`
+(or `run.py dub`). Regenerable artifacts (`script.json`, `timing.json`,
+`voiceover.mp3`, captions, `final.mp4`, `voice_cache/`) stay ignored and
+rebuild from the tracked inputs.
 
 ## Going live (same prerequisites as the main pipeline)
 
@@ -105,9 +123,14 @@ runtime; the `web` client needs a PO token; cookie extraction fails on
 app-bound encryption). Reliable fallback for a progressive mp4:
 
 ```bash
-.venv\Scripts\python.exe -m yt_dlp --extractor-args "youtube:player_client=android" -f 18 \
-  --ffmpeg-location "C:/Users/user/tools/ffmpeg-btbn/ffmpeg-n8.1-latest-win64-gpl-8.1/bin" <url>
+.venv\Scripts\python.exe -m yt_dlp --extractor-args "youtube:player_client=android" ^
+  -f 18 -o "projects\<slug>\source.mp4" <url>
 ```
+
+(Format 18 is a single progressive stream, so no ffmpeg merge is needed. For
+>360p HD, close the browser and add `--cookies-from-browser chrome`, or pass a
+`--cookies cookies.txt` file. The main pipeline's `ingest.py` now applies this
+`android` fallback automatically.)
 
 `-f 18` yields 360p (audio+video, no signature needed). For >360p, close
 Chrome fully and retry `--cookies-from-browser chrome`, or export cookies to a

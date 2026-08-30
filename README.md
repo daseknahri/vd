@@ -87,6 +87,21 @@ Many topics at once:
 `python run.py batch urls.txt` — one URL per line; every project advances to
 its next human gate and failures are reported at the end.
 
+## The other product: dubbing an existing video
+
+A **separate** workflow keeps a source video's picture and lays an Arabic
+voiceover + burned captions over it (it deliberately breaks Hard Rule 1 — see
+**DUB.md**). It is not part of `process`; drive it with:
+
+```bash
+python run.py dub projects\<slug>          # advance to the next dub step
+python run.py dub-approve projects\<slug>  # approve the translation (gates TTS spend)
+python run.py status projects\<slug>       # what's done, either workflow
+```
+
+`run.py process` refuses to run on a dub project. Full step table + how to
+download a source: **DUB.md**.
+
 ## The two human gates
 
 1. **Script read** — you read `script.json` before any money is spent on

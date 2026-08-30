@@ -15,11 +15,30 @@ folder; it is the engineering contract. Companion docs:
 - **DUB.md** — the *separate* dub-and-subtitle path (`scripts/dub_*.py`):
   keeps the source picture, overlays Arabic voice + burned captions.
   Deliberately breaks Hard Rule 1 by design; not part of `run.py process`.
+- **docs/ai-video/** — a curated knowledge base of the AI-video field
+  (generation models, TTS/timestamps, Arabic RTL captions, editing/MCP,
+  publishing, self-hosted stack) + upgrade recommendations. A dated
+  snapshot; refreshable via the `ai-video-field-research` workflow. Read
+  `docs/ai-video/README.md` first — it confirms the current spine is 2026
+  best practice and lists the few worthwhile upgrades.
 
-## Current status (2026-08-02)
+## Current status (2026-08-30)
 
 - **Built and green:** all 8 stages + orchestrator + the video-script
-  skill. `pytest tests/ -q` = **193 passing**, no network or keys needed.
+  skill, plus the dub path. `pytest tests/ -q` = **all passing** (226 at
+  time of writing), no network or keys needed.
+- **Dub path — built, tested, proven (2026-08-30):** the separate
+  keep-the-source Arabic re-voice + subtitle workflow (thin `scripts/dub_*.py`
+  over tested logic in `pipeline/dub.py`, docs in DUB.md) produced its first
+  video (`projects/romeo-juliet-dub`). Drive it with `run.py dub <slug>` /
+  `dub-approve <slug>` / `status <project>`; `run.py process` refuses to run
+  on a dub project. Its translation gate is enforced (dub_voice will not spend
+  without a `.dub_translation_approved` marker).
+- **End-to-end hardening (2026-08-30):** ingest falls back across yt-dlp
+  player clients (the YouTube 403 signature/PO-token wall — try `android`),
+  the ffmpeg fallback is username-agnostic, and small per-project TEXT inputs
+  (translations / project.yaml / segments / source pointer) are git-tracked
+  (see `.gitignore` whitelist) so a fresh clone can rebuild a project.
 - **Operator hardening (2026-08-02):** four offline commands added —
   `doctor` (preflight: toolchain + go-live config), `estimate` (predict
   ElevenLabs characters/$ before spending), `repair-timing` (rebuild
@@ -100,12 +119,14 @@ seconds.
    and `redo` / `--force-stage` re-open (revoke) any gate downstream of the
    changed work (`Project.revoke_gate`) so nothing ships unreviewed.
 3. **Arabic captions are NEVER rendered through libass / the ffmpeg
-   `subtitles` filter on Windows.** Windows ffmpeg builds (gyan, BtbN —
-   both verified 2026-07) ship libass without HarfBuzz: it falls back to
-   legacy presentation-form shaping and modern fonts (Tajawal/Cairo) render
-   tofu boxes for isolated/final forms. All caption rendering goes through
-   `pipeline/captions.py` (Pillow + libraqm = real HarfBuzz shaping,
-   verified correct). `captions.ass` is exported only as a portable
+   `subtitles` filter.** The ban does not depend on the current ffmpeg build:
+   observed Windows builds (gyan, BtbN — verified 2026-07) ship libass without
+   HarfBuzz, so it falls back to legacy presentation-form shaping and modern
+   fonts (Tajawal/Cairo) render tofu boxes for isolated/final forms — and a
+   build's libass capability can change under you. All caption rendering goes
+   through `pipeline/captions.py` (Pillow + libraqm = real HarfBuzz shaping,
+   verified correct) — the single trusted Arabic shaping path in BOTH the
+   faceless pipeline and the dub. `captions.ass` is exported only as a portable
    artifact for humans/CapCut — never burned by libass.
 4. **Never pass Arabic text through PowerShell/Bash command strings** — it
    gets mangled by console codepages. Arabic lives in UTF-8 files only;
@@ -148,9 +169,12 @@ def run(project: Project, cfg: dict, env: dict, *, force: bool = False) -> None
 - Python: `.venv\Scripts\python.exe` (3.12). Installed: yt-dlp,
   faster-whisper, requests, pyyaml, python-dotenv, pillow (**raqm
   enabled** — required for Arabic shaping), fonttools, pytest.
-- ffmpeg is **not on PATH** — resolve via `contract.ffmpeg_path()`
-  (`ffmpeg` / `ffprobe`). It checks `FFMPEG_PATH`/`FFPROBE_PATH`, then PATH,
-  then the known BtbN build at `C:\Users\user\tools\ffmpeg-btbn\...`.
+- **Never assume whether ffmpeg is on PATH** (it varies by machine — a
+  WinGet/gyan build may well be) — always resolve via
+  `contract.ffmpeg_path()` (`ffmpeg` / `ffprobe`). It checks
+  `FFMPEG_PATH`/`FFPROBE_PATH`, then PATH, then per-user fallbacks
+  (`~/tools/ffmpeg-btbn/*/bin`, the WinGet Gyan build) — globbed, no
+  hardcoded username.
 - Fonts: `assets/fonts/` (Tajawal static weights + Cairo variable).
   Tajawal-Bold is the caption font. Never rely on system fonts.
 - API keys: `.env` (see `.env.example`). Code must degrade with a clear
