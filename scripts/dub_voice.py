@@ -1,24 +1,21 @@
 """Dub step 3: script.json -> voiceover.mp3 + timing.json (ElevenLabs).
 
-Unlike pipeline/voice.py (which lays scenes back-to-back), the dub places each
-Arabic clip at its SOURCE-VIDEO timestamp so the narration stays aligned with
-the picture. Each clip is time-fitted into the gap before the next scene:
-played at natural speed when it fits, gently sped up (atempo, capped at
-MAX_SPEED) when it would overrun, and only allowed to push later scenes when
-even the cap is not enough. The whole voiceover is assembled in one ffmpeg
-pass (per-scene atempo -> adelay to its absolute start -> amix), so scenes
-never overlap and the track lands on the absolute [0, total] timeline that
-captions.py and the render step expect.
-
-Reuses the ElevenLabs client + content-addressed cache from pipeline.voice,
+Unlike pipeline/voice.py (scenes back-to-back), the dub places each Arabic clip
+at its SOURCE-VIDEO timestamp so narration stays aligned with the picture, and
+time-fits each clip into the gap before the next scene (pipeline.dub.place_scenes:
+natural speed when it fits, atempo up to a cap, push only past the cap). The
+whole track is assembled in one ffmpeg pass (per-scene atempo -> adelay to its
+absolute start -> amix) onto the absolute [0, total] timeline captions.py and
+dub_render expect. Reuses the ElevenLabs client + content-addressed voice_cache/
 so re-runs never re-bill unchanged scenes.
 
-  .venv\\Scripts\\python.exe scripts\\dub_voice.py romeo-juliet-dub
+  .venv\\Scripts\\python.exe scripts\\dub_voice.py <slug> [--force]
 """
 
 from __future__ import annotations
 
-import json
+import argparse
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -26,115 +23,108 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from pipeline import contract, voice  # noqa: E402
+from pipeline import contract, dub  # noqa: E402
 from pipeline.contract import ffmpeg_path  # noqa: E402
-
-MAX_SPEED = 1.30   # never speed a clip up by more than 30%
-MIN_GAP = 0.05     # seconds; below this a "slot" is treated as unusable
 
 
 def main() -> int:
-    slug = sys.argv[1] if len(sys.argv) > 1 else "romeo-juliet-dub"
-    force = "--force" in sys.argv[2:]
-    pdir = ROOT / "projects" / slug
+    ap = argparse.ArgumentParser(description="dub step 3: ElevenLabs voiceover")
+    ap.add_argument("slug")
+    ap.add_argument("--force", action="store_true")
+    args = ap.parse_args()
+
+    pdir = ROOT / "projects" / args.slug
     project = contract.Project(pdir)
     cfg = contract.load_config(pdir)
     env = contract.load_env()
 
     if (project.has(contract.VOICEOVER) and project.has(contract.TIMING)
-            and not force):
+            and not args.force):
         print("voiceover.mp3 + timing.json already present (use --force)")
         return 0
 
-    script = project.script()
-    segs = json.loads((pdir / "dub_segments.json").read_text(encoding="utf-8"))
+    # Enforced translation gate: never spend without an approval marker.
+    if not project.has(dub.TRANSLATION_APPROVED):
+        print(f"translation not approved — review dub_review.html, then create "
+              f"the marker:\n  run.py dub-approve {args.slug}\n"
+              f"(or: touch projects/{args.slug}/{dub.TRANSLATION_APPROVED})")
+        return 1
+
+    try:
+        script = project.script()
+        segs = dub.load_segments(project)
+        provider = dub.build_provider(cfg, env)   # raises if key/voice_id unset
+    except contract.ContractError as exc:
+        print(f"ERROR: {exc}")
+        return 1
+
     story_start = float(segs["story_start"])
     story_len = float(segs["story_end"]) - story_start
     seg_by_id = {s["id"]: s for s in segs["segments"]}
-
-    provider = voice._build_provider(cfg, env)   # raises if key/voice_id unset
     sig = provider.signature()
     cache_dir = pdir / "voice_cache"; cache_dir.mkdir(exist_ok=True)
     tmp = pdir / "voice_tmp"; tmp.mkdir(exist_ok=True)
+    try:
+        return _synth(project, script, seg_by_id, story_start, story_len,
+                      provider, sig, cache_dir, tmp)
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
 
+
+def _synth(project, script, seg_by_id, story_start, story_len,
+           provider, sig, cache_dir, tmp) -> int:
     scenes = script["scenes"]
     spoken = [s["narration_ar"].strip() for s in scenes]
 
-    # 1. Synthesize every scene (cache-backed) and measure raw durations.
-    raw: list[dict] = []
-    billed = 0
+    raw_durations, words0_all, billed = [], [], 0
     for i, sc in enumerate(scenes):
         prev_text = spoken[i - 1] if i > 0 else ""
         next_text = spoken[i + 1] if i < len(scenes) - 1 else ""
-        audio, alignment, from_cache = voice._synthesize_cached(
+        audio, alignment, from_cache = dub.synthesize_cached(
             provider, cache_dir, sig, spoken[i], prev_text, next_text)
         if not from_cache:
             billed += len(spoken[i])
         rpath = tmp / f"raw_{sc['id']:03d}.mp3"
         rpath.write_bytes(audio)
-        dur = voice._probe_duration(rpath)
+        raw_durations.append(dub.probe_duration(rpath))
         try:
-            words0 = voice._words_from_alignment(spoken[i], alignment, 0.0)
-        except Exception as exc:   # alignment/word-count mismatch -> caption
-            words0 = []            # stage falls back to proportional timing
+            words0_all.append(dub.words_from_alignment(spoken[i], alignment, 0.0))
+        except Exception as exc:
+            words0_all.append([])
             print(f"  scene {sc['id']}: word alignment unusable ({exc}); "
                   f"captions will use proportional timing")
-        raw.append({"sc": sc, "path": rpath, "dur": dur, "words0": words0})
 
-    # 2. Place each clip at its source timestamp, fitting into the gap ahead.
-    timing_scenes: list[dict] = []
-    delays_ms: list[int] = []
-    speeds: list[float] = []
-    prev_end = 0.0
-    overruns: list[int] = []
-    for i, r in enumerate(raw):
-        sid = r["sc"]["id"]
-        desired = float(seg_by_id[sid]["start"]) - story_start
-        start = max(desired, prev_end)
-        nxt = (float(seg_by_id[raw[i + 1]["sc"]["id"]]["start"]) - story_start
-               if i < len(raw) - 1 else story_len)
-        available = nxt - start
-        speed = 1.0
-        if available > MIN_GAP and r["dur"] > available:
-            speed = min(MAX_SPEED, r["dur"] / available)
-            if r["dur"] / speed > available + 1e-3:
-                overruns.append(sid)
-        fitted = r["dur"] / speed
-        end = start + fitted
+    rel_starts = [float(seg_by_id[sc["id"]]["start"]) - story_start
+                  for sc in scenes]
+    plan = dub.place_scenes(raw_durations, rel_starts, story_len)
+
+    timing_scenes = []
+    for i, sc in enumerate(scenes):
+        p = plan["placements"][i]
         words = [{"word": w["word"],
-                  "start": round(start + w["start"] / speed, 3),
-                  "end": round(start + w["end"] / speed, 3)}
-                 for w in r["words0"]]
-        timing_scenes.append({"id": sid, "start": round(start, 3),
-                              "end": round(end, 3), "words": words})
-        delays_ms.append(int(round(start * 1000)))
-        speeds.append(speed)
-        prev_end = end
+                  "start": round(p["start"] + w["start"] / p["speed"], 3),
+                  "end": round(p["start"] + w["end"] / p["speed"], 3)}
+                 for w in words0_all[i]]
+        timing_scenes.append({"id": sc["id"], "start": p["start"],
+                              "end": p["end"], "words": words})
 
-    total = round(max(prev_end, story_len), 3)
-
-    # 3. One ffmpeg pass: atempo per scene -> delay to absolute start -> sum.
+    total = plan["total"]
     cmd = [ffmpeg_path(), "-y", "-hide_banner", "-nostats", "-nostdin"]
-    for r in raw:
-        cmd += ["-i", str(r["path"])]
-    parts = []
-    labels = []
-    for i, (d_ms, sp) in enumerate(zip(delays_ms, speeds)):
+    for i in range(len(scenes)):
+        cmd += ["-i", str(tmp / f"raw_{scenes[i]['id']:03d}.mp3")]
+    parts, labels = [], []
+    for i, p in enumerate(plan["placements"]):
         chain = f"[{i}:a]aresample=48000"
-        if abs(sp - 1.0) > 1e-3:
-            chain += f",atempo={sp:.5f}"
-        chain += f",adelay={d_ms}:all=1[a{i}]"
-        parts.append(chain)
-        labels.append(f"[a{i}]")
-    parts.append(
-        "".join(labels)
-        + f"amix=inputs={len(labels)}:normalize=0:duration=longest[mix]"
-    )
+        if abs(p["speed"] - 1.0) > 1e-3:
+            chain += f",atempo={p['speed']:.5f}"
+        chain += f",adelay={p['delay_ms']}:all=1[a{i}]"
+        parts.append(chain); labels.append(f"[a{i}]")
+    parts.append("".join(labels)
+                 + f"amix=inputs={len(labels)}:normalize=0:duration=longest[mix]")
     parts.append(f"[mix]apad,atrim=0:{total},aresample=48000[out]")
-    voice_path = project.path(contract.VOICEOVER)
     cmd += ["-filter_complex", ";".join(parts), "-map", "[out]",
             "-c:a", "libmp3lame", "-ar", "48000", "-b:a", "192k",
-            str(voice_path)]
+            str(project.path(contract.VOICEOVER))]
     proc = subprocess.run(cmd, capture_output=True, text=True,
                           encoding="utf-8", errors="replace")
     if proc.returncode != 0:
@@ -145,28 +135,18 @@ def main() -> int:
     timing = {"total_seconds": total, "scenes": timing_scenes}
     contract.validate_timing(timing)
     project.write_json(contract.TIMING, timing)
-    project.write_json("voice_report.json", {
-        "workflow": "dub",
-        "total_characters": sum(len(s) for s in spoken),
-        "billed_characters": billed,
-        "story_seconds": round(story_len, 3),
-        "audio_seconds": total,
-        "scenes_sped_up": sum(1 for s in speeds if s > 1.001),
-        "max_speed": round(max(speeds), 3),
-        "overrun_scene_ids": overruns,
+    overrun_ids = [scenes[i]["id"] for i in plan["overruns"]]
+    sped = sum(1 for p in plan["placements"] if p["speed"] > 1.001)
+    max_speed = max((p["speed"] for p in plan["placements"]), default=1.0)
+    project.write_json(dub.VOICE_REPORT, {
+        "workflow": "dub", "total_characters": sum(len(s) for s in spoken),
+        "billed_characters": billed, "story_seconds": round(story_len, 3),
+        "audio_seconds": total, "scenes_sped_up": sped,
+        "max_speed": round(max_speed, 3), "overrun_scene_ids": overrun_ids,
     })
     print(f"wrote voiceover.mp3 ({total:.1f}s) + timing.json ; "
-          f"billed {billed} chars ; "
-          f"{sum(1 for s in speeds if s > 1.001)} scenes sped up "
-          f"(max {max(speeds):.2f}x)"
-          + (f" ; overruns: {overruns}" if overruns else ""))
-    # keep voice_tmp raw mp3s? remove to stay tidy (cache holds the billable audio)
-    for p in tmp.glob("raw_*.mp3"):
-        p.unlink()
-    try:
-        tmp.rmdir()
-    except OSError:
-        pass
+          f"billed {billed} chars ; {sped} scenes sped up (max {max_speed:.2f}x)"
+          + (f" ; overruns: {overrun_ids}" if overrun_ids else ""))
     return 0
 
 
