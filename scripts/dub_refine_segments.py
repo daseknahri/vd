@@ -1,62 +1,57 @@
 """Dub step 1b: merge whisper fragments into whole sentences.
 
-The raw whisper pass split on a 7s cap, fragmenting some sentences. This
-rejoins consecutive fragments until sentence-ending punctuation, trims to the
-story window [first_keep .. last_keep] (dropping the channel tagline and the
-teaching section), and renumbers. Timing is preserved: merged sentence start =
-first fragment start, end = last fragment end.
+The raw whisper pass (dub_segments.json) may split a sentence across fragments.
+This rejoins consecutive fragments in id-range [first..last] into whole
+sentences and writes dub_segments.refined.json — leaving the raw file intact
+(so this is re-runnable and the raw whisper output is never destroyed).
+Downstream steps prefer the refined file when present (pipeline.dub.load_segments).
 
-  .venv\\Scripts\\python.exe scripts\\dub_refine_segments.py romeo-juliet-dub 2 56
+  .venv\\Scripts\\python.exe scripts\\dub_refine_segments.py <slug> <first_id> <last_id>
 """
 
 from __future__ import annotations
 
-import json
+import argparse
 import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+
+from pipeline import contract, dub  # noqa: E402
 
 
 def main() -> int:
-    if len(sys.argv) != 4:
-        print("usage: dub_refine_segments.py <slug> <first_id> <last_id>")
-        return 2
-    slug, first_id, last_id = sys.argv[1], int(sys.argv[2]), int(sys.argv[3])
-    pdir = ROOT / "projects" / slug
-    raw = json.loads((pdir / "dub_segments.json").read_text(encoding="utf-8"))
-    kept = [s for s in raw["segments"] if first_id <= s["id"] <= last_id]
+    ap = argparse.ArgumentParser(description="dub step 1b: merge fragments")
+    ap.add_argument("slug")
+    ap.add_argument("first_id", type=int)
+    ap.add_argument("last_id", type=int)
+    ap.add_argument("--force", action="store_true")
+    args = ap.parse_args()
 
-    merged: list[dict] = []
-    buf: list[dict] = []
-    for s in kept:
-        buf.append(s)
-        if s["en"].rstrip()[-1:] in ".?!":
-            merged.append(_join(buf, len(merged) + 1))
-            buf = []
-    if buf:
-        merged.append(_join(buf, len(merged) + 1))
+    pdir = ROOT / "projects" / args.slug
+    project = contract.Project(pdir)
+    if project.has(dub.SEGMENTS_REFINED) and not args.force:
+        print(f"{dub.SEGMENTS_REFINED} already present (use --force)")
+        return 0
+    if not project.has(dub.SEGMENTS):
+        print(f"ERROR: {dub.SEGMENTS} not found — run dub_segment.py first")
+        return 1
 
-    out = {
-        "source": "whisper timing scaffolding (English never enters output)",
-        "story_start": merged[0]["start"],
-        "story_end": merged[-1]["end"],
-        "segments": merged,
-    }
-    (pdir / "dub_segments.json").write_text(
-        json.dumps(out, ensure_ascii=False, indent=2), encoding="utf-8")
-    print(f"merged {len(kept)} fragments -> {len(merged)} sentences")
-    print(f"window {out['story_start']:.2f}s -> {out['story_end']:.2f}s")
+    try:
+        raw = project.read_json(dub.SEGMENTS)
+        out = dub.refine_segments(raw, args.first_id, args.last_id)
+    except contract.ContractError as exc:
+        print(f"ERROR: {exc}")
+        return 1
+
+    project.write_json(dub.SEGMENTS_REFINED, out)
+    n_kept = sum(1 for s in raw["segments"]
+                 if args.first_id <= s["id"] <= args.last_id)
+    print(f"merged {n_kept} fragments -> {len(out['segments'])} sentences "
+          f"({out['story_start']:.2f}s -> {out['story_end']:.2f}s)")
+    print(f"wrote {pdir / dub.SEGMENTS_REFINED} (raw {dub.SEGMENTS} kept)")
     return 0
-
-
-def _join(buf: list[dict], new_id: int) -> dict:
-    return {
-        "id": new_id,
-        "start": buf[0]["start"],
-        "end": buf[-1]["end"],
-        "en": " ".join(x["en"].strip() for x in buf).strip(),
-    }
 
 
 if __name__ == "__main__":

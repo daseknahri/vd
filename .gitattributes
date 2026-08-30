@@ -1,0 +1,9 @@
+# Normalize line endings across Windows <-> Unix clones. Text files are stored
+# with LF in git; .env/.json/.yaml stay byte-clean (no CRLF surprises for the
+# dotenv/ffmpeg/json readers). PowerShell scripts keep CRLF if any are added.
+* text=auto eol=lf
+*.ps1 text eol=crlf
+*.mp4 binary
+*.mp3 binary
+*.png binary
+*.mov binary

@@ -1,0 +1,31 @@
+# Dub workflow override: keep the source video's 16:9 frame (global config
+# targets 9:16 portrait). Rendered at 1280x720 (mild upscale from the 360p
+# source so burned captions are crisp). Caption sizing tuned for landscape.
+video:
+  aspect_ratio: "16:9"
+  width: 1280
+  height: 720
+  fps: 30
+
+captions:
+  font_size: 40
+  margin_v: 50
+
+voice:
+  # George — warm, mature male narrator (ElevenLabs premade). Chosen for the
+  # somber literary tone. Swap this id + re-run dub_voice.py to change voice;
+  # the TTS cache re-bills only what changed.
+  voice_id: "JBFqnCBsd6RMkjVDRZzb"
+
+dub:
+  # Cover the source's burned-in English subtitles (canvas y ~554-676).
+  # A floating band (cover_bottom < 720) shows the scene below it.
+  cover_top: 544
+  cover_bottom: 690
+  cover_color: "black"
+  # Erase the static channel watermark (top-right) via delogo.
+  watermark:
+    x: 1126
+    y: 12
+    w: 116
+    h: 112

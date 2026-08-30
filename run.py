@@ -24,6 +24,7 @@ from __future__ import annotations
 import argparse
 import importlib
 import re
+import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -321,10 +322,27 @@ def cmd_new_topic(args: argparse.Namespace) -> int:
     return 0
 
 
+def _project_workflow(project: Project) -> str | None:
+    """meta.workflow from script.json ('dub' for dub projects), or None."""
+    if not project.has(contract.SCRIPT):
+        return None
+    try:
+        return ((project.script().get("meta") or {}).get("workflow"))
+    except ContractError:
+        return None
+
+
 def cmd_process(args: argparse.Namespace) -> int:
     project = _open_project(args.project_dir)
     if project is None:
         return 1
+    if _project_workflow(project) == "dub":
+        # A dub project keeps the source video (breaks Hard Rule 1 by design);
+        # the faceless `process` pipeline does not apply. Redirect, don't run.
+        say("this is a DUB project (script.json meta.workflow=dub).")
+        say("The faceless 'process' pipeline does not apply here. Drive it with:")
+        say(f'  python run.py dub "{project.dir}"   (see DUB.md)')
+        return 0
     status = _run_stages(project, force_stage=args.force_stage)
     # Waiting at a gate is a designed stop, not a failure: exit 0.
     return 1 if status.error else 0
@@ -455,11 +473,39 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     if doctor.has_failures(checks):
         n = sum(1 for c in checks if c.status == doctor.FAIL)
         say(f"result: {n} toolchain check(s) FAILED - fix before running")
-        return 1
-    todo = sum(1 for c in checks if c.status == doctor.WARN)
-    say(f"result: toolchain OK - {todo} item(s) to configure before going live"
-        if todo else "result: all checks passed - ready to make videos")
-    return 0
+        rc = 1
+    else:
+        todo = sum(1 for c in checks if c.status == doctor.WARN)
+        say(f"result: toolchain OK - {todo} item(s) to configure before going live"
+            if todo else "result: all checks passed - ready to make videos")
+        rc = 0
+    _print_dub_readiness(args.project_dir, cfg)
+    return rc
+
+
+def _print_dub_readiness(project_dir: str | None, cfg: dict | None) -> None:
+    """When doctor is pointed at a dub project, add a dub-readiness section.
+    Informational only (never changes the toolchain exit code)."""
+    if not project_dir:
+        return
+    from pipeline import dub
+    p = Project(Path(project_dir))
+    is_dub = (_project_workflow(p) == "dub"
+              or p.has(dub.SEGMENTS) or p.has(dub.SEGMENTS_REFINED))
+    if not is_dub:
+        return
+    voice_id = str(((cfg or {}).get("voice") or {}).get("voice_id") or "").strip()
+    rows = [
+        ((p.dir / contract.SOURCE_VIDEO).exists(), "source video present"),
+        (bool(voice_id), "voice.voice_id set (project.yaml/config.yaml)"),
+        (p.has(dub.SEGMENTS) or p.has(dub.SEGMENTS_REFINED), "segments built"),
+        (p.has(dub.TRANSLATIONS), "dub_translations.json present"),
+        (p.has(dub.TRANSLATION_APPROVED), "translation approved"),
+    ]
+    say()
+    say("dub readiness (this project):")
+    for ok, label in rows:
+        say(f"  [{'OK' if ok else '..'}] {label}")
 
 
 def cmd_repair_timing(args: argparse.Namespace) -> int:
@@ -540,6 +586,135 @@ def _print_summary(results: list[tuple[str, Status]]) -> None:
         say(f"{name:<{name_w}}  {last:<{last_w}}  {note}")
 
 
+SCRIPTS_DIR = Path(__file__).resolve().parent / "scripts"
+
+
+def _dub_script(slug: str, name: str, *extra: str) -> int:
+    """Run one scripts/dub_*.py in a subprocess with the current interpreter
+    (the venv Python), so its own guards/idempotency apply. Returns exit code."""
+    cmd = [sys.executable, str(SCRIPTS_DIR / name), slug, *extra]
+    return subprocess.run(cmd).returncode
+
+
+def cmd_dub(args: argparse.Namespace) -> int:
+    """Advance a DUB project to its next step (see DUB.md). Runs the automatable
+    steps (segment, build, captions, voice-after-approval, render) and STOPS with
+    instructions at the manual ones (write translations, approve). Never folds
+    the dub into `process`; it is a dispatcher over the dub scripts."""
+    project = _open_project(args.project_dir)
+    if project is None:
+        return 1
+    from pipeline import dub
+    p, slug = project, project.dir.name
+
+    if not (p.dir / contract.SOURCE_VIDEO).exists():
+        say(f"[dub] no {contract.SOURCE_VIDEO} in {p.dir} - download the source "
+            f"first (see DUB.md 'Downloading the source').")
+        return 1
+    if not (p.has(dub.SEGMENTS) or p.has(dub.SEGMENTS_REFINED)):
+        say("[dub] segmenting source with whisper (a few minutes)...")
+        if (rc := _dub_script(slug, "dub_segment.py")):
+            return rc
+        say(f"[dub] next (manual): if the source has a non-story tail, trim with "
+            f'dub_refine_segments.py "{slug}" <first> <last>; then write the Arabic '
+            f"translations in projects/{slug}/{dub.TRANSLATIONS}.")
+        return 0
+    if not p.has(dub.TRANSLATIONS):
+        say(f"[dub] write the Arabic translations: projects/{slug}/{dub.TRANSLATIONS}")
+        say(f"      (a 'post' block with title/description/hashtags and a "
+            f"'source_url' are required).")
+        return 0
+    if not p.has(contract.SCRIPT):
+        say("[dub] building script.json + review page...")
+        if (rc := _dub_script(slug, "dub_build_script.py")):
+            return rc
+        _dub_script(slug, "dub_review.py")  # review page failure is non-fatal
+    if not p.has(dub.TRANSLATION_APPROVED):
+        say(f"[dub] GATE: review projects/{slug}/dub_review.html, then approve:")
+        say(f'      python run.py dub-approve "{p.dir}"')
+        return 0
+    if not (p.has(contract.VOICEOVER) and p.has(contract.TIMING)):
+        say("[dub] generating the Arabic voiceover (ElevenLabs - this spends)...")
+        if (rc := _dub_script(slug, "dub_voice.py")):
+            return rc
+    cap_manifest = f"{contract.CAPTIONS_DIR}/{contract.CAPTIONS_MANIFEST}"
+    if not p.has(cap_manifest):
+        say("[dub] rendering Arabic captions (Pillow+raqm)...")
+        try:
+            cfg = contract.load_config(p.dir)
+            _load_stage("captions")(p, cfg, contract.load_env(), force=False)
+        except (StageError, ContractError) as exc:
+            say(f"[dub] captions failed: {exc}")
+            return 1
+    if not p.has(contract.FINAL):
+        say("[dub] final render...")
+        if (rc := _dub_script(slug, "dub_render.py")):
+            return rc
+    say(f"[dub] done: {p.path(contract.FINAL)}")
+    return 0
+
+
+def cmd_dub_approve(args: argparse.Namespace) -> int:
+    """Record the human translation-review approval for a dub project. The
+    enforced gate: dub_voice.py refuses to spend without this marker."""
+    project = _open_project(args.project_dir)
+    if project is None:
+        return 1
+    from pipeline import dub
+    if not project.has(contract.SCRIPT):
+        say("warning: script.json not built yet - approving translation anyway")
+    project.path(dub.TRANSLATION_APPROVED).write_text("approved\n", encoding="utf-8")
+    say(f"translation approved for {project.dir.name}")
+    say(f'next: python run.py dub "{project.dir}"')
+    return 0
+
+
+def cmd_status(args: argparse.Namespace) -> int:
+    """Show where a project stands: which contracted outputs exist, for either
+    workflow. Read-only; a fresh session's first orientation command."""
+    project = _open_project(args.project_dir)
+    if project is None:
+        return 1
+    from pipeline import dub
+    p = project
+    is_dub = (_project_workflow(p) == "dub"
+              or p.has(dub.SEGMENTS) or p.has(dub.SEGMENTS_REFINED))
+    say(f"project: {p.dir.name}")
+    if is_dub:
+        say("workflow: dub (keeps the source video)")
+        seg_name = (dub.SEGMENTS_REFINED if p.has(dub.SEGMENTS_REFINED)
+                    else dub.SEGMENTS)
+        steps = [
+            ("source video", contract.SOURCE_VIDEO),
+            ("segments", seg_name),
+            ("translations", dub.TRANSLATIONS),
+            ("script.json", contract.SCRIPT),
+            ("translation approved", dub.TRANSLATION_APPROVED),
+            ("voiceover.mp3", contract.VOICEOVER),
+            ("timing.json", contract.TIMING),
+            ("captions", f"{contract.CAPTIONS_DIR}/{contract.CAPTIONS_MANIFEST}"),
+            ("final.mp4", contract.FINAL),
+        ]
+    else:
+        kind = "topic-first" if p.is_topic_first() else "url-first"
+        say(f"workflow: faceless ({kind})")
+        steps = [
+            ("source", contract.TOPIC if p.is_topic_first() else contract.SOURCE_URL),
+            ("transcript", contract.TRANSCRIPT),
+            ("script.json", contract.SCRIPT),
+            ("gate 1 (script)", contract.GATE1_APPROVED),
+            ("voiceover.mp3", contract.VOICEOVER),
+            ("timing.json", contract.TIMING),
+            ("captions", f"{contract.CAPTIONS_DIR}/{contract.CAPTIONS_MANIFEST}"),
+            ("final.mp4", contract.FINAL),
+            ("gate 2 (review)", contract.GATE2_APPROVED),
+            ("post.json", contract.POST),
+        ]
+    for label, fname in steps:
+        say(f"  [{'x' if p.has(fname) else ' '}] {label}")
+    return 0
+
+
 # --------------------------------------------------------------------------
 # CLI
 # --------------------------------------------------------------------------
@@ -609,6 +784,24 @@ def build_parser() -> argparse.ArgumentParser:
         help="rebuild timing.json from the voiceover (whisper) and re-render")
     p.add_argument("project_dir")
     p.set_defaults(func=cmd_repair_timing)
+
+    p = sub.add_parser(
+        "dub",
+        help="advance a dub project to its next step (see DUB.md)")
+    p.add_argument("project_dir")
+    p.set_defaults(func=cmd_dub)
+
+    p = sub.add_parser(
+        "dub-approve",
+        help="record the dub translation-review approval (gates dub_voice spend)")
+    p.add_argument("project_dir")
+    p.set_defaults(func=cmd_dub_approve)
+
+    p = sub.add_parser(
+        "status",
+        help="show which outputs exist for a project (either workflow)")
+    p.add_argument("project_dir")
+    p.set_defaults(func=cmd_status)
 
     return parser
 

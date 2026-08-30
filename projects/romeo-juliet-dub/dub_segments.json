@@ -1,0 +1,247 @@
+{
+  "source": "whisper timing scaffolding (English never enters output)",
+  "story_start": 5.02,
+  "story_end": 268.84,
+  "segments": [
+    {
+      "id": 1,
+      "start": 5.02,
+      "end": 19.46,
+      "en": "In the beautiful city of Verona, there were two rich and powerful families, the Montague's and the Capulets."
+    },
+    {
+      "id": 2,
+      "start": 19.46,
+      "end": 23.88,
+      "en": "They had an old and angry feud."
+    },
+    {
+      "id": 3,
+      "start": 23.88,
+      "end": 34.76,
+      "en": "Even their servants and friends fought in the streets and the Prince of the city was very angry about it."
+    },
+    {
+      "id": 4,
+      "start": 34.76,
+      "end": 42.74,
+      "en": "One day, the Capulet family planned a grand masked ball."
+    },
+    {
+      "id": 5,
+      "start": 42.74,
+      "end": 47.58,
+      "en": "Romeo, who was a Montague, was feeling very sad."
+    },
+    {
+      "id": 6,
+      "start": 47.58,
+      "end": 52.96,
+      "en": "His friends convinced him to go to the party secretly."
+    },
+    {
+      "id": 7,
+      "start": 52.96,
+      "end": 57.36,
+      "en": "He wore a mask to hide his face from the enemies."
+    },
+    {
+      "id": 8,
+      "start": 57.36,
+      "end": 66.64,
+      "en": "At the party, Romeo saw Juliet."
+    },
+    {
+      "id": 9,
+      "start": 66.64,
+      "end": 70.82,
+      "en": "She was the most beautiful girl he had ever seen."
+    },
+    {
+      "id": 10,
+      "start": 70.82,
+      "end": 77.54,
+      "en": "They talked and fell in love at first sight before they knew their families were enemies."
+    },
+    {
+      "id": 11,
+      "start": 77.54,
+      "end": 86.96,
+      "en": "When they found out the truth, they were shocked, but their love was too strong."
+    },
+    {
+      "id": 12,
+      "start": 86.96,
+      "end": 94.36,
+      "en": "Later that night, Romeo secretly went to Juliet's garden."
+    },
+    {
+      "id": 13,
+      "start": 94.36,
+      "end": 96.86,
+      "en": "He stood under her balcony."
+    },
+    {
+      "id": 14,
+      "start": 96.86,
+      "end": 104.62,
+      "en": "They talked under the moonlight and promised to love each other forever."
+    },
+    {
+      "id": 15,
+      "start": 104.62,
+      "end": 114.64,
+      "en": "The next day, they went to a kind monk named Friar Lawrence."
+    },
+    {
+      "id": 16,
+      "start": 114.64,
+      "end": 120.64,
+      "en": "He married them secretly, hoping this marriage would bring peace to the two families."
+    },
+    {
+      "id": 17,
+      "start": 120.64,
+      "end": 128.02,
+      "en": "But happiness didn't last long."
+    },
+    {
+      "id": 18,
+      "start": 128.02,
+      "end": 134.12,
+      "en": "Juliet's angry cousins started a street fight with Romeo's best friend."
+    },
+    {
+      "id": 19,
+      "start": 134.12,
+      "end": 141.24,
+      "en": "In the chaos, a terrible accident happened and Romeo was blamed."
+    },
+    {
+      "id": 20,
+      "start": 141.24,
+      "end": 148.86,
+      "en": "The Prince of Verona exiled Romeo from the city forever."
+    },
+    {
+      "id": 21,
+      "start": 148.86,
+      "end": 156.36,
+      "en": "Juliet was heartbroken."
+    },
+    {
+      "id": 22,
+      "start": 156.36,
+      "end": 162.36,
+      "en": "To make things worse, her father told her she must marry a rich man named Paris."
+    },
+    {
+      "id": 23,
+      "start": 162.36,
+      "end": 167.46,
+      "en": "Juliet ran to Friar Lawrence for help."
+    },
+    {
+      "id": 24,
+      "start": 167.46,
+      "end": 169.96,
+      "en": "He gave her a special sleeping potion."
+    },
+    {
+      "id": 25,
+      "start": 169.96,
+      "end": 172.12,
+      "en": "He told her..."
+    },
+    {
+      "id": 26,
+      "start": 172.12,
+      "end": 174.14,
+      "en": "Drink this."
+    },
+    {
+      "id": 27,
+      "start": 174.14,
+      "end": 177.96,
+      "en": "You'll fall into a deep sleep and appear to be dead."
+    },
+    {
+      "id": 28,
+      "start": 177.96,
+      "end": 181.84,
+      "en": "I'll send a letter to Romeo, explaining our plan."
+    },
+    {
+      "id": 29,
+      "start": 181.84,
+      "end": 188.82,
+      "en": "Juliet drank the potion and her sad family put her in the family tomb."
+    },
+    {
+      "id": 30,
+      "start": 188.82,
+      "end": 193.78,
+      "en": "Unfortunately, the letter never reached Romeo."
+    },
+    {
+      "id": 31,
+      "start": 193.78,
+      "end": 199.62,
+      "en": "Instead, a friend told him that Juliet was gone forever."
+    },
+    {
+      "id": 32,
+      "start": 199.62,
+      "end": 206.6,
+      "en": "Romeo could not live without her, so he bought a fast horse and went back to Verona."
+    },
+    {
+      "id": 33,
+      "start": 206.6,
+      "end": 215.28,
+      "en": "Romeo arrived at the tomb and saw Juliet."
+    },
+    {
+      "id": 34,
+      "start": 215.28,
+      "end": 218.1,
+      "en": "He thought she was really gone."
+    },
+    {
+      "id": 35,
+      "start": 218.1,
+      "end": 225.38,
+      "en": "His heart could not take the pain and he passed away from deep sadness right next to her."
+    },
+    {
+      "id": 36,
+      "start": 225.38,
+      "end": 233.86,
+      "en": "Moments later, Juliet woke up from her deep sleep."
+    },
+    {
+      "id": 37,
+      "start": 233.86,
+      "end": 242.28,
+      "en": "When she saw Romeo's lifeless body, her heart broke too and she joined him in eternal sleep."
+    },
+    {
+      "id": 38,
+      "start": 242.28,
+      "end": 250.7,
+      "en": "When the Montagues and Capulets saw this tragedy, they cried bitterly."
+    },
+    {
+      "id": 39,
+      "start": 250.7,
+      "end": 256.26,
+      "en": "They finally understood that their foolish hate had a very high price."
+    },
+    {
+      "id": 40,
+      "start": 256.26,
+      "end": 268.84,
+      "en": "Ashamed, they stopped fighting, built golden statues of Romeo and Juliet and made peace forever."
+    }
+  ]
+}

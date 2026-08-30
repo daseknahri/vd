@@ -1,127 +1,87 @@
 """Dub step 1: source video -> timed English sentences (research/timing only).
 
 Runs faster-whisper on the source audio with word timestamps, isolates the
-story window, and groups words into caption-sized sentences with precise
-(start, end) times. Output feeds the translation step; NOTHING here is copied
-into the final video's audio or text — the English is timing scaffolding only.
+story window (up to a configurable end marker), and groups words into
+caption-sized sentences with precise (start, end) times. Output feeds the
+translation step; NOTHING here is copied into the final video's audio or text
+— the English is timing scaffolding only.
 
-Writes projects/<slug>/dub_segments.json:
-  {"story_start": float, "story_end": float,
-   "segments": [{"id", "start", "end", "en"}]}
+The story-end marker defaults to pipeline.dub.DEFAULT_STORY_END_MARKER; override
+per project via project.yaml `dub.story_end_marker`, or on the CLI with
+`--marker "phrase"`. When no marker matches, the WHOLE transcript is used and a
+loud warning is printed (a different source video needs its own marker).
 
 Console output stays ASCII (CLAUDE.md rule 4). Run from repo root:
-  .venv\\Scripts\\python.exe scripts\\dub_segment.py romeo-juliet-dub
+  .venv\\Scripts\\python.exe scripts\\dub_segment.py <slug> [--marker "phrase"]
 """
 
 from __future__ import annotations
 
+import argparse
 import json
 import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
 
-# Phrase that marks the end of the narrated story (the teaching section
-# begins right after it). Matched on a lowercased, punctuation-stripped
-# rolling window of whisper words.
-STORY_END_MARKER = "now let s do some shadowing"
-# Max spoken seconds per caption sentence before we force a split on the
-# nearest sentence punctuation; keeps captions to ~1-2 lines.
-MAX_SENTENCE_S = 7.0
-
-
-def _norm(word: str) -> str:
-    return "".join(c for c in word.lower() if c.isalnum() or c.isspace()).strip()
+from pipeline import contract, dub  # noqa: E402
 
 
 def main() -> int:
-    if len(sys.argv) != 2:
-        print("usage: dub_segment.py <project-slug>")
-        return 2
-    slug = sys.argv[1]
-    pdir = ROOT / "projects" / slug
-    src = pdir / "source.mp4"
+    ap = argparse.ArgumentParser(description="dub step 1: whisper segmentation")
+    ap.add_argument("slug", help="project folder under projects/")
+    ap.add_argument("--marker", default=None,
+                    help="story-end phrase (overrides project.yaml dub.story_end_marker)")
+    ap.add_argument("--force", action="store_true",
+                    help="re-run even if dub_segments.json exists")
+    args = ap.parse_args()
+
+    pdir = ROOT / "projects" / args.slug
+    project = contract.Project(pdir)
+    if project.has(dub.SEGMENTS) and not args.force:
+        print(f"{dub.SEGMENTS} already present (use --force to re-run)")
+        return 0
+    src = pdir / contract.SOURCE_VIDEO
     if not src.exists():
-        print(f"ERROR: {src} not found")
+        print(f"ERROR: {src} not found. Download the source first, e.g.:\n"
+              f"  .venv\\Scripts\\python.exe -m yt_dlp "
+              f'--extractor-args "youtube:player_client=android" -f 18 '
+              f'-o "{src}" <URL>\n'
+              f"  (see DUB.md 'Downloading the source' for HD options)")
         return 1
 
-    from faster_whisper import WhisperModel
+    cfg = contract.load_config(pdir)
+    marker = (args.marker
+              or (cfg.get("dub") or {}).get("story_end_marker")
+              or dub.DEFAULT_STORY_END_MARKER)
 
+    from faster_whisper import WhisperModel
     print("loading whisper (small, cpu/int8)...")
     model = WhisperModel("small", device="cpu", compute_type="int8")
     print("transcribing with word timestamps (this takes a few minutes)...")
-    segments, info = model.transcribe(
-        str(src), language="en", word_timestamps=True,
-    )
-
-    # Flatten to a word stream with times; also keep segment-level sentence
-    # boundaries (whisper puts punctuation on the last word of a clause).
-    words: list[dict] = []
-    for seg in segments:
-        for w in (seg.words or []):
-            text = w.word.strip()
-            if not text:
-                continue
-            words.append({"t": text, "start": float(w.start),
-                          "end": float(w.end)})
-
+    segments, info = model.transcribe(str(src), language="en",
+                                      word_timestamps=True)
+    words = [{"t": w.word.strip(), "start": float(w.start), "end": float(w.end)}
+             for seg in segments for w in (seg.words or []) if w.word.strip()]
     if not words:
         print("ERROR: whisper produced no words")
         return 1
 
-    # Locate the story-end marker on a rolling normalized window.
-    story_end_idx = len(words)
-    norm_words = [_norm(w["t"]) for w in words]
-    marker_tokens = STORY_END_MARKER.split()
-    for i in range(len(norm_words) - len(marker_tokens) + 1):
-        window = " ".join(norm_words[i:i + len(marker_tokens)]).split()
-        if window == marker_tokens:
-            story_end_idx = i
-            break
-    story_words = words[:story_end_idx]
-    story_start = story_words[0]["start"]
-    story_end = story_words[-1]["end"]
-    print(f"story window: {story_start:.2f}s -> {story_end:.2f}s "
-          f"({len(story_words)} words; marker "
-          f"{'found' if story_end_idx < len(words) else 'NOT found -> used full'})")
-
-    # Group words into sentences: break after a word ending in .?! or when
-    # the running sentence exceeds MAX_SENTENCE_S.
-    segs: list[dict] = []
-    cur: list[dict] = []
-    cur_start = story_words[0]["start"]
-    for w in story_words:
-        cur.append(w)
-        ends_sentence = w["t"].rstrip()[-1:] in ".?!"
-        too_long = (w["end"] - cur_start) >= MAX_SENTENCE_S
-        if ends_sentence or too_long:
-            segs.append({
-                "id": len(segs) + 1,
-                "start": round(cur_start, 3),
-                "end": round(w["end"], 3),
-                "en": " ".join(x["t"] for x in cur).strip(),
-            })
-            cur = []
-            if w is not story_words[-1]:
-                cur_start = w["end"]
-    if cur:
-        segs.append({
-            "id": len(segs) + 1,
-            "start": round(cur_start, 3),
-            "end": round(cur[-1]["end"], 3),
-            "en": " ".join(x["t"] for x in cur).strip(),
-        })
-
-    out = {
-        "story_start": round(story_start, 3),
-        "story_end": round(story_end, 3),
-        "language_probability": round(float(getattr(info, "language_probability", 0.0)), 3),
-        "segments": segs,
-    }
-    out_path = pdir / "dub_segments.json"
-    out_path.write_text(json.dumps(out, ensure_ascii=False, indent=2),
-                        encoding="utf-8")
-    print(f"wrote {out_path} : {len(segs)} sentences")
+    out = dub.build_segments(
+        words, marker, dub.MAX_SENTENCE_S,
+        getattr(info, "language_probability", 0.0))
+    project.write_json(dub.SEGMENTS, out)
+    print(f"story window: {out['story_start']:.2f}s -> {out['story_end']:.2f}s "
+          f"({len(out['segments'])} sentences)")
+    if not out["marker_found"]:
+        print("=" * 64)
+        print(f"WARNING: story-end marker {marker!r} NOT found — used the WHOLE")
+        print("transcript. If this source has a non-story tail (teaching/outro),")
+        print("set the right phrase via --marker or project.yaml dub.story_end_marker,")
+        print("or trim the story window with dub_refine_segments.py <slug> <first> <last>.")
+        print("=" * 64)
+    print(f"wrote {pdir / dub.SEGMENTS}")
     return 0
 
 

@@ -2,8 +2,22 @@
 .venv/
 __pycache__/
 *.pyc
-projects/
+.pytest_cache/
 assets/music/*
 !assets/music/.gitkeep
 assets/used_clips.json
-.pytest_cache/
+
+# Project folders are working state + large media, ignored by default. But a
+# few small TEXT inputs ARE tracked so a fresh clone can rebuild a project:
+# the human translation, per-project config, and the source pointer/segments.
+# Media (source.mp4, voiceover.mp3, final.mp4, clips, caption PNGs, voice_cache)
+# and regenerable JSON (script.json, timing.json) stay ignored.
+projects/**
+!projects/**/
+!projects/*/project.yaml
+!projects/*/dub_translations.json
+!projects/*/dub_segments.json
+!projects/*/dub_segments.refined.json
+!projects/*/source_url.txt
+!projects/*/topic.txt
+!projects/*/pronunciation.json
