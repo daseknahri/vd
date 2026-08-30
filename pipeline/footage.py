@@ -61,6 +61,14 @@ def _download(url: str, dest: Path) -> None:
             resp = requests.get(url, stream=True, timeout=_TIMEOUT)
             try:
                 resp.raise_for_status()
+                # Guard against an error page (HTML/JSON) served as HTTP 200 in
+                # place of the clip; retry, then fail cleanly rather than saving
+                # a "video" that is really an error body.
+                ctype = (getattr(resp, "headers", None) or {}).get(
+                    "Content-Type", "").lower()
+                if ctype.startswith(("text/", "application/json")):
+                    raise requests.RequestException(
+                        f"expected a video but got Content-Type {ctype!r}")
                 with open(tmp, "wb") as fh:
                     for chunk in resp.iter_content(chunk_size=1 << 16):
                         if chunk:

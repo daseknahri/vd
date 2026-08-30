@@ -451,3 +451,13 @@ def _probe(path: Path, report: dict, project: Project) -> dict[str, Any]:
             out["height"] = st.get("height")
             break
     return out
+
+
+# --------------------------------------------------------------------------
+# Public, stable aliases for reuse by the dub workflow (pipeline/dub.py) and
+# tests. The underscore versions remain the implementation; import these so
+# the dub path never reaches into private render internals.
+# --------------------------------------------------------------------------
+load_manifest = _load_manifest
+build_caption_track = _build_caption_track
+probe = _probe

@@ -61,10 +61,22 @@ class TTSProvider(Protocol):
 # HTTP
 # --------------------------------------------------------------------------
 
+def _retry_after_seconds(resp: "requests.Response") -> int:
+    """Parse a Retry-After header (delta-seconds form) into a non-negative int;
+    0 when absent or unparseable. ElevenLabs sends it on 429/5xx overload."""
+    try:
+        return max(0, int(resp.headers.get("Retry-After", "0")))
+    except (ValueError, TypeError):
+        return 0
+
+
 def _post_json(url: str, *, headers: dict, body: dict) -> dict:
-    """POST with timeout + 3-attempt exponential backoff. 200 -> parsed JSON."""
+    """POST with timeout + 3-attempt exponential backoff. 200 -> parsed JSON.
+    On 429/503/529 the server's Retry-After (if larger) overrides the backoff,
+    so we wait the rate-limit/overload window instead of hammering."""
     last_error = ""
     for attempt in range(3):
+        backoff = 2 ** attempt
         try:
             resp = requests.post(url, headers=headers, json=body, timeout=30)
             if resp.status_code == 200:
@@ -75,10 +87,11 @@ def _post_json(url: str, *, headers: dict, body: dict) -> dict:
             last_error = f"HTTP {resp.status_code}: {resp.text[:300]}"
             if 400 <= resp.status_code < 500 and resp.status_code != 429:
                 break  # bad key / bad request won't heal with retries
+            backoff = max(backoff, _retry_after_seconds(resp))
         except requests.RequestException as exc:
             last_error = str(exc)
         if attempt < 2:
-            time.sleep(2 ** attempt)
+            time.sleep(backoff)
     raise StageError(STAGE, f"TTS request failed: {last_error}")
 
 
@@ -345,6 +358,17 @@ def _concat_mp3s(scene_paths: list[Path], out_path: Path, workdir: Path) -> None
     if proc.returncode != 0:
         raise StageError(STAGE, f"ffmpeg concat failed: "
                                 f"{proc.stderr.strip()[:500]}")
+
+
+# --------------------------------------------------------------------------
+# Public, stable aliases for reuse by the dub workflow (pipeline/dub.py) and
+# tests. The underscore versions remain the implementation; import these so
+# the dub path never reaches into private voice internals.
+# --------------------------------------------------------------------------
+build_provider = _build_provider
+synthesize_cached = _synthesize_cached
+probe_duration = _probe_duration
+words_from_alignment = _words_from_alignment
 
 
 # --------------------------------------------------------------------------

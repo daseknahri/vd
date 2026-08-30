@@ -39,12 +39,18 @@ ROOT = Path(__file__).resolve().parent.parent
 # their libass lacks HarfBuzz and mangles modern Arabic fonts (verified
 # 2026-06: gyan 8.1.1 and BtbN n8.1 both fail). Captions go through
 # pipeline/captions.py (Pillow + libraqm) instead.
-_FFMPEG_FALLBACKS = [
-    r"C:\Users\user\tools\ffmpeg-btbn\ffmpeg-n8.1-latest-win64-gpl-8.1\bin",
-    r"C:\Users\user\AppData\Local\Microsoft\WinGet\Packages"
-    r"\Gyan.FFmpeg_Microsoft.Winget.Source_8wekyb3d8bbwe"
-    r"\ffmpeg-8.1.1-full_build\bin",
-]
+def _ffmpeg_fallback_dirs() -> list[Path]:
+    """Last-resort ffmpeg bin dirs, derived per-user (no hardcoded username) so
+    the resolver works on any Windows account. Version subdirs are globbed.
+    Env override and PATH are tried first; these only catch a documented local
+    install (a ~/tools BtbN unzip, or the WinGet Gyan build)."""
+    dirs: list[Path] = []
+    dirs += sorted((Path.home() / "tools" / "ffmpeg-btbn").glob("*/bin"))
+    local = os.environ.get("LOCALAPPDATA")
+    if local:
+        packages = Path(local) / "Microsoft" / "WinGet" / "Packages"
+        dirs += sorted(packages.glob("Gyan.FFmpeg*/ffmpeg-*/bin"))
+    return dirs
 
 
 def ffmpeg_path(tool: str = "ffmpeg") -> str:
@@ -55,8 +61,8 @@ def ffmpeg_path(tool: str = "ffmpeg") -> str:
     found = shutil.which(tool)
     if found:
         return found
-    for folder in _FFMPEG_FALLBACKS:
-        candidate = Path(folder) / f"{tool}.exe"
+    for folder in _ffmpeg_fallback_dirs():
+        candidate = folder / f"{tool}.exe"
         if candidate.exists():
             return str(candidate)
     raise FileNotFoundError(

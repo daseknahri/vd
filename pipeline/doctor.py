@@ -103,8 +103,8 @@ def _check_dependencies() -> list[Check]:
         "fontTools": "font resolution",
     }
     golive = {
-        "yt_dlp": "ingest download (URL-first projects)",
-        "faster_whisper": "ingest transcription (URL-first projects)",
+        "yt_dlp": "ingest download (URL-first) + dub source download",
+        "faster_whisper": "ingest transcription (URL-first) + dub segmentation",
     }
     checks: list[Check] = []
     for mod, why in toolchain.items():

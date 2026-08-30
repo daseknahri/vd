@@ -63,10 +63,12 @@ def pixabay_hit(vid, duration, sizes):
 
 
 class FakeResponse:
-    def __init__(self, json_data=None, content=b"", status_code=200):
+    def __init__(self, json_data=None, content=b"", status_code=200,
+                 headers=None):
         self._json = json_data
         self._content = content
         self.status_code = status_code
+        self.headers = headers or {}
 
     def json(self):
         return self._json
@@ -394,3 +396,24 @@ def test_redo_run_merges_report(api, project, cfg):
               for e in project.read_json(footage.FOOTAGE_REPORT)}
     assert report[1]["status"] == "ok"  # scene 1 entry survives the redo
     assert report[2]["status"] == "ok"
+
+
+def test_download_rejects_html_error_body(tmp_path, monkeypatch):
+    """An error page (text/html) served as HTTP 200 must not be saved as a
+    clip: retried, then failed cleanly, leaving no file behind."""
+    from pipeline.errors import StageError
+
+    calls = []
+
+    def fake_get(url, stream=False, timeout=None, **kw):
+        calls.append(url)
+        return FakeResponse(content=b"<html>error</html>",
+                            headers={"Content-Type": "text/html; charset=utf-8"})
+
+    monkeypatch.setattr(footage.requests, "get", fake_get)
+    monkeypatch.setattr(footage.time, "sleep", lambda s: None)
+    dest = tmp_path / "clip.mp4"
+    with pytest.raises(StageError):
+        footage._download("http://cdn/clip.mp4", dest)
+    assert not dest.exists()
+    assert len(calls) == footage._ATTEMPTS  # retried, then failed

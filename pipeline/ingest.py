@@ -77,32 +77,83 @@ def _existing_audio(project: Project) -> Path | None:
     return matches[0] if matches else None
 
 
+# YouTube now rejects yt-dlp's default web client on many videos (HTTP 403 —
+# the signature / PO-token wall) unless a JS runtime or cookies are present.
+# We try the default first (correct for non-YouTube and cookie-authed hosts),
+# then fall back to player clients that still serve a progressive stream
+# without a JS runtime. Each variant is merged over the base opts. For >360p
+# HD, pass cookies via yt-dlp directly (see SETUP.md "YouTube sources").
+_YTDLP_CLIENT_VARIANTS: list[dict] = [
+    {},  # default
+    {"extractor_args": {"youtube": {"player_client": ["android"]}}},
+    {"extractor_args": {"youtube": {"player_client": ["ios"]}}},
+]
+
+
+def _client_label(variant: dict) -> str:
+    clients = (variant.get("extractor_args", {})
+               .get("youtube", {}).get("player_client"))
+    return clients[0] if clients else "default"
+
+
+def _clear_download(project: Project) -> None:
+    """Remove any source_audio.* (partials included) left by a failed attempt,
+    so the next client's download starts clean and _existing_audio can't pick
+    up a half-file."""
+    for p in project.dir.glob(f"{AUDIO_STEM}.*"):
+        try:
+            p.unlink()
+        except OSError:
+            pass
+
+
 def _download_audio(project: Project, url: str) -> tuple[Path, dict[str, Any]]:
     import yt_dlp  # local: keep module import light
 
-    opts = {
+    # Resolve the retryable exception defensively (the class lives in
+    # yt_dlp.utils; referencing it only when present keeps test fakes simple).
+    download_error = getattr(getattr(yt_dlp, "utils", None), "DownloadError", None)
+    retryable = (download_error,) if download_error else ()
+    base = {
         "format": "bestaudio/best",
         "outtmpl": str(project.dir / f"{AUDIO_STEM}.%(ext)s"),
         "noplaylist": True,
         "quiet": True,
         "no_warnings": True,
+        "socket_timeout": 30,
+        "retries": 3,
+        "fragment_retries": 3,
     }
-    try:
-        with yt_dlp.YoutubeDL(opts) as ydl:
-            info = ydl.extract_info(url, download=True) or {}
-    except Exception as exc:
-        raise StageError(STAGE, f"audio download failed for {url}: {exc}") from exc
-    audio = _existing_audio(project)
-    if audio is None:
-        raise StageError(
-            STAGE, f"yt-dlp finished but wrote no {AUDIO_STEM}.* file"
-        )
-    meta = {
-        key: info.get(key)
-        for key in ("title", "duration", "uploader")
-        if info.get(key) is not None
-    }
-    return audio, meta
+    attempts: list[str] = []
+    for variant in _YTDLP_CLIENT_VARIANTS:
+        opts = {**base, **variant}
+        try:
+            with yt_dlp.YoutubeDL(opts) as ydl:
+                info = ydl.extract_info(url, download=True) or {}
+        except Exception as exc:
+            # Only 403/extractor-class failures fall through to the next client;
+            # anything else (bad config, disk) is a real error — surface it.
+            if not (retryable and isinstance(exc, retryable)):
+                raise StageError(
+                    STAGE, f"audio download failed for {url}: {exc}") from exc
+            attempts.append(f"{_client_label(variant)}: {exc}")
+            _clear_download(project)
+            continue
+        audio = _existing_audio(project)
+        if audio is not None:
+            meta = {
+                key: info.get(key)
+                for key in ("title", "duration", "uploader")
+                if info.get(key) is not None
+            }
+            return audio, meta
+        attempts.append(f"{_client_label(variant)}: wrote no {AUDIO_STEM}.* file")
+        _clear_download(project)
+    raise StageError(
+        STAGE,
+        f"audio download failed for {url} after trying clients "
+        f"[{', '.join(_client_label(v) for v in _YTDLP_CLIENT_VARIANTS)}]: "
+        + " | ".join(attempts[-3:]))
 
 
 def _transcribe(

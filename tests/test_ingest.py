@@ -213,6 +213,57 @@ def test_segments_without_timing_become_one_paragraph(tmp_path, fakes):
     assert project.read_text(contract.TRANSCRIPT) == "جملة اولى جملة ثانية\n"
 
 
+def test_download_falls_back_to_android_on_403(tmp_path, monkeypatch):
+    """YouTube's default client now 403s; ingest must fall through to a player
+    client that still serves a stream. Default raises DownloadError -> android
+    is tried and succeeds."""
+    calls: list[str] = []
+
+    class DownloadError(Exception):
+        pass
+
+    class FakeYoutubeDL:
+        def __init__(self, opts):
+            self.opts = opts
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def extract_info(self, url, download=True):
+            client = (self.opts.get("extractor_args", {})
+                      .get("youtube", {}).get("player_client"))
+            calls.append(client[0] if client else "default")
+            if not client:  # default web client -> signature/PO-token 403
+                raise DownloadError("HTTP Error 403: Forbidden")
+            Path(self.opts["outtmpl"] % {"ext": "mp4"}).write_bytes(b"audio")
+            return {"title": "T", "duration": 1, "uploader": "U"}
+
+    fake_yt = types.ModuleType("yt_dlp")
+    fake_yt.YoutubeDL = FakeYoutubeDL
+    fake_yt.utils = SimpleNamespace(DownloadError=DownloadError)
+
+    class FakeWhisperModel:
+        def __init__(self, *a, **k):
+            pass
+
+        def transcribe(self, path, **k):
+            return (iter([SimpleNamespace(text="x", start=0.0, end=1.0)]),
+                    SimpleNamespace(language="ar", language_probability=0.9))
+
+    fake_fw = types.ModuleType("faster_whisper")
+    fake_fw.WhisperModel = FakeWhisperModel
+    monkeypatch.setitem(sys.modules, "yt_dlp", fake_yt)
+    monkeypatch.setitem(sys.modules, "faster_whisper", fake_fw)
+
+    project = make_project(tmp_path)
+    ingest.run(project, CFG, {})
+    assert calls == ["default", "android"]
+    assert project.has(contract.TRANSCRIPT)
+
+
 def test_module_import_never_loads_whisper(monkeypatch):
     monkeypatch.delitem(sys.modules, "faster_whisper", raising=False)
     monkeypatch.delitem(sys.modules, "yt_dlp", raising=False)
