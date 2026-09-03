@@ -151,13 +151,16 @@ To pick up work on another laptop:
    `assets/music/`; none are tracked.
 4. **Verify** — run step 5 (`pytest` + the no-keys sample render). If both
    pass, the machine is ready.
-5. **In-flight project folders** — anything under `projects/` is gitignored
-   and does **not** sync. To keep working an existing project (rather than
-   starting fresh), copy its whole `projects/<slug>/` folder across manually.
-   For a **dub** project that means at least `source.mp4`, `project.yaml`,
-   and `dub_translations.json` (see [DUB.md](DUB.md)); the pipeline regenerates
-   everything else. For a normal project, `source_url.txt` / `topic.txt` plus
-   any approved `script.json` are the pieces worth carrying.
+5. **In-flight project folders** — media and regenerable JSON under
+   `projects/` are gitignored, but the small TEXT inputs now travel with the
+   clone (the `.gitignore` whitelist tracks `project.yaml`,
+   `dub_translations.json`, `dub_segments*.json`, `source_url.txt`,
+   `topic.txt`, `pronunciation.json`). So for a **dub** project you only need
+   to re-supply the media by hand — `source.mp4` (re-download; see DUB.md) —
+   then re-run `run.py dub projects\<slug>` and the pipeline rebuilds
+   `script.json` / `timing.json` / `voiceover.mp3` / captions / `final.mp4`.
+   For a normal URL/topic project, `source_url.txt` / `topic.txt` already sync;
+   just re-run `run.py process`.
 
 That's it — code, the `video-script` skill, fonts, and all four docs
 (CLAUDE / README / SETUP / [DUB.md](DUB.md)) travel with the clone.
