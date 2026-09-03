@@ -13,22 +13,15 @@ neighbors. Scene boundaries derive from their first/last word.
 
 from __future__ import annotations
 
-import difflib
-import unicodedata
 from pathlib import Path
 from typing import Any
 
-from pipeline import contract
+from pipeline import contract, wordtiming
 from pipeline.contract import ContractError, Project
 from pipeline.errors import StageError
 
 STAGE = "align"
 SCENE_END_PADDING = 0.15  # seconds added after a scene's last word
-
-# Arabic tashkeel/diacritics U+064B..U+0652 — whisper output and script text
-# disagree on these constantly, so matching ignores them.
-_TASHKEEL = frozenset(chr(c) for c in range(0x064B, 0x0653))
-_TATWEEL = "ـ"
 
 
 def run(project: Project, cfg: dict, env: dict, *, force: bool = False) -> None:
@@ -138,71 +131,21 @@ def _transcribe(audio: Path, cfg: dict) -> tuple[list[dict[str, Any]], float]:
 # --------------------------------------------------------------------------
 # Alignment
 # --------------------------------------------------------------------------
-
-def _normalize(word: str) -> str:
-    """Matching form: no tashkeel, no tatweel, no punctuation, no spaces."""
-    kept = []
-    for ch in unicodedata.normalize("NFC", word):
-        if ch in _TASHKEEL or ch == _TATWEEL or ch.isspace():
-            continue
-        if unicodedata.category(ch).startswith("P"):
-            continue
-        kept.append(ch)
-    return "".join(kept).casefold()
-
-
-def _norm_seq(tokens: list[str], side: str) -> list[str]:
-    # Words that normalize to "" (pure punctuation) get a per-side unique
-    # sentinel so two empties never count as a match. The U+E000 private-use
-    # prefix guarantees a sentinel can never equal a real normalized word.
-    return [
-        _normalize(t) or f"{side}{i}" for i, t in enumerate(tokens)
-    ]
-
+# Word matching + gap interpolation now live in pipeline/wordtiming.py (shared
+# with the TTS worker); thin wrappers keep _build_timing's call sites unchanged.
 
 def _match_times(
     whisper_words: list[dict[str, Any]], display_tokens: list[str]
 ) -> list[tuple[float, float] | None]:
     """Whisper times for each display token; None where unmatched."""
-    a = _norm_seq([w["word"] for w in whisper_words], "w")
-    b = _norm_seq(display_tokens, "d")
-    times: list[tuple[float, float] | None] = [None] * len(display_tokens)
-    matcher = difflib.SequenceMatcher(None, a, b, autojunk=False)
-    for block in matcher.get_matching_blocks():
-        for k in range(block.size):
-            w = whisper_words[block.a + k]
-            times[block.b + k] = (w["start"], w["end"])
-    return times
+    return wordtiming.match_times(
+        [w["word"] for w in whisper_words],
+        [(w["start"], w["end"]) for w in whisper_words],
+        display_tokens,
+    )
 
 
-def _fill_gaps(
-    times: list[tuple[float, float] | None], total: float
-) -> list[tuple[float, float]]:
-    """Linear interpolation for unmatched words between matched neighbors."""
-    n = len(times)
-    matched = [i for i, t in enumerate(times) if t is not None]
-    if not matched:
-        step = total / n if n else 0.0
-        return [(i * step, (i + 1) * step) for i in range(n)]
-
-    out: list[Any] = list(times)
-
-    def fill(lo: int, hi: int, left: float, right: float) -> None:
-        count = hi - lo + 1
-        right = max(right, left)
-        step = (right - left) / count
-        for g in range(count):
-            out[lo + g] = (left + g * step, left + (g + 1) * step)
-
-    first, last = matched[0], matched[-1]
-    if first > 0:
-        fill(0, first - 1, 0.0, out[first][0])
-    for left_i, right_i in zip(matched, matched[1:]):
-        if right_i - left_i > 1:
-            fill(left_i + 1, right_i - 1, out[left_i][1], out[right_i][0])
-    if last < n - 1:
-        fill(last + 1, n - 1, out[last][1], total)
-    return out
+_fill_gaps = wordtiming.fill_gaps
 
 
 def _build_timing(

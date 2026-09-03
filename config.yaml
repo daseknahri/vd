@@ -21,6 +21,19 @@ voice:
   speed: 1.0
   # usd_per_1k_chars: 0.30    # optional: your plan's rate — enables the $
                               # figure in `python run.py estimate <project>`
+  # --- Self-hosted open TTS (fixed cost). To enable, set provider: "chatterbox"
+  #     above. No ElevenLabs key/voice_id needed; word timing is recovered by
+  #     WhisperX forced alignment. Requires the separate GPU venv —
+  #     see docs/ai-video/SELF_HOSTED_TTS.md.
+  chatterbox:
+    # ai_python: 'D:\vd-ai\venv\Scripts\python.exe'  # GPU venv python (this
+    #   machine's default; else set env VD_AI_PYTHON). build() falls back to it.
+    # hf_home: 'D:\vd-ai\models'    # where model weights cache (this machine: D:)
+    language: "ar"
+    voice_ref: ""               # optional ~5s reference wav (cloning); "" = default voice
+    exaggeration: 0.5
+    cfg_weight: 0.5
+    seed: 0                      # >0 = reproducible audio (keeps voice_cache stable)
 
 footage:
   providers: ["pexels", "pixabay"]   # tried in order

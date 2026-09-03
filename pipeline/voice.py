@@ -151,26 +151,35 @@ def _build_provider(cfg: dict, env: dict) -> TTSProvider:
     voice_cfg = cfg.get("voice")
     if not isinstance(voice_cfg, dict):
         raise ContractError("config: 'voice' section is required")
-    voice_id = str(voice_cfg.get("voice_id") or "").strip()
-    if not voice_id:
-        raise ContractError(
-            "config: voice.voice_id is empty — set your ElevenLabs voice id "
-            "in config.yaml (or the project's project.yaml)"
+    name = str(voice_cfg.get("provider", "elevenlabs")).strip().lower()
+
+    if name == "elevenlabs":
+        voice_id = str(voice_cfg.get("voice_id") or "").strip()
+        if not voice_id:
+            raise ContractError(
+                "config: voice.voice_id is empty — set your ElevenLabs voice id "
+                "in config.yaml (or the project's project.yaml)"
+            )
+        api_key = require_env(env, "ELEVENLABS_API_KEY", "ElevenLabs TTS (voice stage)")
+        return ElevenLabsTTS(
+            api_key=api_key,
+            voice_id=voice_id,
+            model_id=voice_cfg.get("model_id", "eleven_multilingual_v2"),
+            stability=float(voice_cfg.get("stability", 0.5)),
+            similarity_boost=float(voice_cfg.get("similarity_boost", 0.75)),
+            speed=float(voice_cfg.get("speed", 1.0)),
         )
-    name = voice_cfg.get("provider", "elevenlabs")
-    if name != "elevenlabs":
-        raise ContractError(
-            f"config: voice.provider '{name}' is not implemented "
-            f"(only 'elevenlabs')"
-        )
-    api_key = require_env(env, "ELEVENLABS_API_KEY", "ElevenLabs TTS (voice stage)")
-    return ElevenLabsTTS(
-        api_key=api_key,
-        voice_id=voice_id,
-        model_id=voice_cfg.get("model_id", "eleven_multilingual_v2"),
-        stability=float(voice_cfg.get("stability", 0.5)),
-        similarity_boost=float(voice_cfg.get("similarity_boost", 0.75)),
-        speed=float(voice_cfg.get("speed", 1.0)),
+
+    if name == "chatterbox":
+        # Self-hosted open TTS (fixed cost). Needs no ElevenLabs key/voice_id;
+        # word timing comes from WhisperX forced alignment inside the provider.
+        # Lazy import so the pipeline venv never hard-depends on it.
+        from pipeline import chatterbox_tts
+        return chatterbox_tts.build(voice_cfg, env)
+
+    raise ContractError(
+        f"config: voice.provider '{name}' is not implemented "
+        f"(supported: 'elevenlabs', 'chatterbox')"
     )
 
 
