@@ -72,7 +72,18 @@ This command MUST print `True`:
 python -c "from PIL import features; print(features.check('raqm'))"
 ```
 
-- **Windows:** the Pillow wheels bundle raqm — `True` out of the box.
+- **Windows:** current PyPI Pillow wheels **no longer bundle raqm** — wheels
+  `>= 12.2` dropped it entirely, and `11.0`–`12.1` load `libraqm.dll`
+  dynamically but a clean machine lacks the DLL. `requirements.txt` therefore
+  pins `pillow<12.2`; then run the one-shot helper, which stages a conda-forge
+  libraqm DLL closure into the venv and writes a `sitecustomize.py` so every
+  venv Python call finds it:
+  ```powershell
+  .\.venv\Scripts\python.exe scripts\setup_raqm_windows.py
+  ```
+  It is idempotent (a no-op once raqm works). The DLLs live in `.venv\raqm\`,
+  so **rebuilding the venv means re-running this script.** (Older/other machines
+  may already print `True` if libraqm is present system-wide from another tool.)
 - **Debian/Ubuntu:** install the system libs, then rebuild Pillow from source:
   ```bash
   sudo apt-get install -y libraqm-dev libharfbuzz-dev libfribidi-dev libfreetype-dev
