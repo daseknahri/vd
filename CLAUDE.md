@@ -22,11 +22,24 @@ folder; it is the engineering contract. Companion docs:
   `docs/ai-video/README.md` first — it confirms the current spine is 2026
   best practice and lists the few worthwhile upgrades.
 
-## Current status (2026-08-30)
+## Current status (2026-09-04)
 
 - **Built and green:** all 8 stages + orchestrator + the video-script
-  skill, plus the dub path. `pytest tests/ -q` = **all passing** (226 at
+  skill, plus the dub path. `pytest tests/ -q` = **all passing** (260 at
   time of writing), no network or keys needed.
+- **Local-AI upgrades (2026-09-04) — built, proven, opt-in behind flags:**
+  - *Self-hosted Arabic TTS* — `voice.provider: chatterbox` runs Chatterbox
+    Multilingual + WhisperX forced alignment on the local GPU (zeros the TTS
+    variable cost), behind the same `TTSProvider` interface, so `timing.json`
+    + captions are unchanged. ElevenLabs stays the default until its Arabic
+    quality is A/B'd. See **docs/ai-video/SELF_HOSTED_TTS.md**.
+  - *Generated B-roll* — `footage.ai_broll: true` generates each scene's clip
+    via a headless ComfyUI + LTX-Video instead of stock (stock stays the
+    fallback). Add a descriptive per-scene `broll_prompt` for on-topic results.
+    See **docs/ai-video/GENERATED_BROLL.md**.
+  - Both run in a SEPARATE GPU stack under `D:\vd-ai\` (its own venvs +
+    models), driven over a subprocess/REST boundary so the pipeline venv stays
+    torch-free and green. Verified on an RTX 3060 Ti (8 GB).
 - **Dub path — built, tested, proven (2026-08-30):** the separate
   keep-the-source Arabic re-voice + subtitle workflow (thin `scripts/dub_*.py`
   over tested logic in `pipeline/dub.py`, docs in DUB.md) produced its first

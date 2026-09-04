@@ -48,7 +48,7 @@ edges.
 
 ## Highest-leverage upgrades to consider (not urgent, weigh against principles)
 
-1. **Generated B-roll instead of stock.** Replace/augment the Pexels→Pixabay
+1. **Generated B-roll instead of stock.** ✅ *Built 2026-09-04 — local ComfyUI + LTX-Video, opt-in `footage.ai_broll`; see GENERATED_BROLL.md.* Replace/augment the Pexels→Pixabay
    footage stage with AI-generated, literal-visual scene clips. *Fixed-cost
    path:* self-host **LTX-Video** (fast, 16 GB GPU) or **Wan 2.2** (photoreal
    humans) via ComfyUI's headless API — keeps "only variable cost is TTS".
@@ -58,7 +58,7 @@ edges.
 2. **Publishing via a unified API** (Blotato / Ayrshare / Postiz), *if/when*
    auto-post is ever enabled — never native TikTok/YouTube/IG APIs (audit gates,
    ~6 uploads/day, 25/day caps). Still behind Hard Rule 2. (doc 05)
-3. **Self-hosted TTS to zero the variable cost** — **Chatterbox Multilingual**
+3. **Self-hosted TTS to zero the variable cost** ✅ *Built 2026-09-04 — opt-in `voice.provider: chatterbox`; see SELF_HOSTED_TTS.md.* — **Chatterbox Multilingual**
    (MIT, Arabic, cloning) + **WhisperX** forced alignment to recover word
    timings (since open TTS won't hand you ElevenLabs-style timestamps). Adds an
    alignment step; ElevenLabs stays the default until this is proven. (docs 02, 06)
