@@ -45,7 +45,8 @@ CDN 403s). For **8 GB use the fp8 T5** (fp16 won't fit):
 
 | File | Repo | → folder |
 |------|------|----------|
-| `ltx-video-2b-v0.9.5.safetensors` | `Lightricks/LTX-Video` | `ComfyUI/models/checkpoints/` |
+| `ltxv-2b-0.9.6-distilled-04-25.safetensors` **(default, 8-step)** | `Lightricks/LTX-Video` | `ComfyUI/models/checkpoints/` |
+| `ltx-video-2b-v0.9.5.safetensors` *(optional 20-step base)* | `Lightricks/LTX-Video` | `ComfyUI/models/checkpoints/` |
 | `t5xxl_fp8_e4m3fn.safetensors` | `comfyanonymous/flux_text_encoders` | `ComfyUI/models/text_encoders/` |
 
 Launch headless (leave it running while you make videos):
@@ -65,8 +66,8 @@ footage:
   ai_broll: true
   broll:
     comfy_url: "http://127.0.0.1:8188"
-    steps: 20        # 15 is ~30% faster; 20-30 improves prompt adherence
-    # width/height/length/fps/cfg/sampler/checkpoint/t5 also configurable
+    # defaults to the 8-step distilled model (steps 8, cfg 1.0) — ~70s/clip
+    # width/height/length/fps/checkpoint/t5/sampler also configurable
 ```
 
 Then run the normal loop; the footage stage generates instead of searching.
@@ -87,20 +88,27 @@ weak, off-topic clips. Two ways to get good results:
 2. **Fallback:** the built-in template wraps all keyword sets in cinematic
    framing — acceptable for scenic/abstract subjects, weaker for specific ones.
 
-Raising `steps` (20→30) also improves adherence at a time cost.
+The distilled default is fixed at 8 steps (more won't help), so rely on the
+prompt for adherence. On the base model, raising `steps` (20→30) helps.
 
 ## Performance & footprint (RTX 3060 Ti, 8 GB)
 
 | | Value |
 |---|---|
 | VRAM peak | ~4.5 GB (LTX-2B; T5 offloaded after encode) — fits 8 GB |
-| Per clip (~4 s, 768×512) | ~112 s @20 steps, ~88 s @15 steps |
-| First-ever generation | +one-time CUDA warmup |
+| Per clip (~4 s, 768×512) | **~65–80 s (default 8-step distilled)**; ~112 s for the 20-step base |
+| First generation each session | +one-time ~2 min CUDA warmup |
+| Note | fixed T5-encode + 97-frame VAE-decode overhead (~25–30 s) is why 8 vs 20 steps is only ~1.6× |
 
-A 12-scene video ≈ 18–22 min of generation — unattended, fixed cost. For higher
-quality/photoreal humans, **Wan 2.2** is the heavier alternative (tighter on
-8 GB); for paid speed/quality, the connected Higgsfield MCP (per-second cost,
-breaks fixed-cost — opt-in only).
+A 12-scene video ≈ ~14 min of generation with the distilled default (vs ~22 min
+on the base) — unattended, fixed cost. To go faster still: lower `length`/
+resolution, or try the fp8 distilled variant. For higher quality/photoreal
+humans, **Wan 2.2** is the heavier alternative (tighter on 8 GB); for paid
+speed/quality, the connected Higgsfield MCP (per-second cost, opt-in only).
+
+> **Timing gotcha:** ComfyUI caches results — resubmitting the *same* prompt +
+> seed returns the cached clip in ~2 s, which is not a real generation time.
+> Vary the seed (the pipeline does) to measure honestly.
 
 ## AI-generated labeling
 

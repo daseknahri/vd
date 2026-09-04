@@ -181,14 +181,19 @@ def build(fcfg: dict) -> ComfyBroll:
     b = (fcfg.get("broll") or {})
     return ComfyBroll(
         url=str(b.get("comfy_url", "http://127.0.0.1:8188")),
-        checkpoint=str(b.get("checkpoint", "ltx-video-2b-v0.9.5.safetensors")),
+        # Default = the 8-step DISTILLED 2B: ~65-80s/clip vs ~112s for the
+        # 20-step base on 8 GB (~1.6x faster; the fixed T5-encode + VAE-decode
+        # overhead is what keeps it from being dramatic), equal-or-better
+        # quality. Distilled needs cfg=1.0 (guidance baked in) and 8 steps. To
+        # use the base 0.9.5 instead, set checkpoint back + steps: 20, cfg: 3.0.
+        checkpoint=str(b.get("checkpoint", "ltxv-2b-0.9.6-distilled-04-25.safetensors")),
         t5=str(b.get("t5", "t5xxl_fp8_e4m3fn.safetensors")),
         width=int(b.get("width", 768)),
         height=int(b.get("height", 512)),
         length=int(b.get("length", 97)),
         fps=int(b.get("fps", 25)),
-        steps=int(b.get("steps", 20)),
-        cfg=float(b.get("cfg", 3.0)),
+        steps=int(b.get("steps", 8)),
+        cfg=float(b.get("cfg", 1.0)),
         sampler=str(b.get("sampler", "euler")),
         negative=str(b.get("negative", DEFAULT_NEGATIVE)),
     )

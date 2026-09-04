@@ -31,7 +31,8 @@ def test_prompt_for_scene_prefers_explicit_broll_prompt():
 def test_build_defaults():
     g = broll_comfy.build({})
     assert g.url == "http://127.0.0.1:8188"
-    assert g.checkpoint.endswith(".safetensors") and g.steps == 20
+    # default is the 8-step distilled model (cfg 1.0)
+    assert "distilled" in g.checkpoint and g.steps == 8 and g.cfg == 1.0
 
 
 def test_build_overrides_and_strips_trailing_slash():
