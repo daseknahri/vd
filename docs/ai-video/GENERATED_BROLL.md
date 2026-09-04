@@ -66,8 +66,8 @@ footage:
   ai_broll: true
   broll:
     comfy_url: "http://127.0.0.1:8188"
-    # defaults to the 8-step distilled model (steps 8, cfg 1.0) — ~70s/clip
-    # width/height/length/fps/checkpoint/t5/sampler also configurable
+    # defaults to the 8-step distilled model (steps 8, cfg 1.0); each clip's
+    # length is matched to its scene, capped by max_seconds. ~25-45s/clip warm.
 ```
 
 Then run the normal loop; the footage stage generates instead of searching.
@@ -96,15 +96,19 @@ prompt for adherence. On the base model, raising `steps` (20→30) helps.
 | | Value |
 |---|---|
 | VRAM peak | ~4.5 GB (LTX-2B; T5 offloaded after encode) — fits 8 GB |
-| Per clip (~4 s, 768×512) | **~65–80 s (default 8-step distilled)**; ~112 s for the 20-step base |
-| First generation each session | +one-time ~2 min CUDA warmup |
-| Note | fixed T5-encode + 97-frame VAE-decode overhead (~25–30 s) is why 8 vs 20 steps is only ~1.6× |
+| Per clip, warm | **~25–45 s** (default distilled; scales with per-scene clip length) — ~112 s for the 20-step base |
+| First generation each session | +one-time ~100 s CUDA warmup |
+| Clip length | matched per scene to the scene's duration (no last-frame freeze), capped by `max_seconds` |
+| Note | timings vary with GPU boost/thermal state — treat as ballpark |
 
-A 12-scene video ≈ ~14 min of generation with the distilled default (vs ~22 min
-on the base) — unattended, fixed cost. To go faster still: lower `length`/
-resolution, or try the fp8 distilled variant. For higher quality/photoreal
-humans, **Wan 2.2** is the heavier alternative (tighter on 8 GB); for paid
-speed/quality, the connected Higgsfield MCP (per-second cost, opt-in only).
+A 12-scene video ≈ ~6–10 min with the distilled default (after the one-time
+warmup) — unattended, fixed cost. Note for this 8 GB Ampere card: the **fp8**
+variant is NOT faster (fp8 is emulated, not accelerated), and shrinking `length`
+below a scene's duration only makes the render freeze the last frame — so
+**per-scene length (the default) is the right lever, not fp8 or a fixed short
+length**. For higher quality/photoreal humans, **Wan 2.2** is the heavier
+alternative (tighter on 8 GB); for paid speed/quality, the connected Higgsfield
+MCP (per-second cost, opt-in only).
 
 > **Timing gotcha:** ComfyUI caches results — resubmitting the *same* prompt +
 > seed returns the cached clip in ~2 s, which is not a real generation time.

@@ -363,6 +363,11 @@ def _run_generated(project: Project, scenes: list[dict], fcfg: dict,
     from pipeline import broll_comfy  # lazy: optional feature, no hard dependency
 
     gen = broll_comfy.build(fcfg)
+    # Match each clip's length to its scene's real duration so the render never
+    # freezes a too-short clip (render_ffmpeg tpad=clone). Voice runs before
+    # footage, so timing.json exists in the normal flow; fall back to the
+    # script's target_seconds otherwise.
+    durations = _scene_durations(project)
     entries = _load_report_entries(project)
     for scene in scenes:
         sid = scene["id"]
@@ -370,17 +375,39 @@ def _run_generated(project: Project, scenes: list[dict], fcfg: dict,
             entries.setdefault(sid, {"scene": sid, "status": "exists"})
             continue
         prompt = broll_comfy.prompt_for_scene(scene)
+        dur = durations.get(sid) or float(scene.get("target_seconds") or 0) or 4.0
+        length = broll_comfy.frames_for_duration(dur, gen.fps, max_seconds=gen.max_seconds)
         out = project.clips_dir / f"scene_{sid:03d}.mp4"
         try:
-            gen.generate(prompt, out, seed=random.randint(0, 2**31 - 1))
+            gen.generate(prompt, out, seed=random.randint(0, 2**31 - 1), length=length)
             entries[sid] = {"scene": sid, "status": "generated",
-                            "provider": "comfyui-ltxv", "prompt": prompt}
+                            "provider": "comfyui-ltxv", "prompt": prompt,
+                            "frames": length, "duration_s": round(dur, 2)}
         except StageError as exc:
             entries[sid] = {"scene": sid, "status": "error",
                             "provider": "comfyui-ltxv", "prompt": prompt,
                             "error": str(exc)}
     project.write_json(FOOTAGE_REPORT,
                        [entries[k] for k in sorted(entries)])
+
+
+def _scene_durations(project: Project) -> dict[int, float]:
+    """{scene_id: seconds} from timing.json (written by the voice stage, which
+    runs before footage), or {} if it is absent/unreadable — callers then fall
+    back to the script's target_seconds."""
+    if not project.has(contract.TIMING):
+        return {}
+    try:
+        timing = project.timing()
+    except ContractError:
+        return {}
+    out: dict[int, float] = {}
+    for s in timing.get("scenes", []):
+        try:
+            out[int(s["id"])] = float(s["end"]) - float(s["start"])
+        except (KeyError, TypeError, ValueError):
+            continue
+    return out
 
 
 def _orientation_from_aspect(aspect_ratio: str) -> str:

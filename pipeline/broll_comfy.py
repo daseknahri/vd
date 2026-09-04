@@ -46,21 +46,22 @@ class ComfyBroll:
 
     def __init__(self, *, url: str, checkpoint: str, t5: str, width: int,
                  height: int, length: int, fps: int, steps: int, cfg: float,
-                 sampler: str, negative: str) -> None:
+                 sampler: str, negative: str, max_seconds: float = 8.0) -> None:
         self.url = url.rstrip("/")
         self.checkpoint = checkpoint
         self.t5 = t5
         self.width = width
         self.height = height
-        self.length = length
+        self.length = length          # fallback frame count when no per-scene length
         self.fps = fps
         self.steps = steps
         self.cfg = cfg
         self.sampler = sampler
         self.negative = negative
+        self.max_seconds = max_seconds  # cap for per-scene length (speed + VRAM)
 
     # -- workflow (built from ComfyUI's real LTXV node schemas) -----------
-    def _workflow(self, prompt: str, seed: int) -> dict:
+    def _workflow(self, prompt: str, seed: int, length: int) -> dict:
         return {
             "1": {"class_type": "CheckpointLoaderSimple",
                   "inputs": {"ckpt_name": self.checkpoint}},
@@ -70,7 +71,7 @@ class ComfyBroll:
             "4": {"class_type": "CLIPTextEncode", "inputs": {"text": self.negative, "clip": ["2", 0]}},
             "5": {"class_type": "EmptyLTXVLatentVideo",
                   "inputs": {"width": self.width, "height": self.height,
-                             "length": self.length, "batch_size": 1}},
+                             "length": length, "batch_size": 1}},
             "6": {"class_type": "ModelSamplingLTXV",
                   "inputs": {"model": ["1", 0], "max_shift": 2.05, "base_shift": 0.95,
                              "latent": ["5", 0]}},
@@ -110,8 +111,10 @@ class ComfyBroll:
         return r.json()
 
     # -- generate one clip ------------------------------------------------
-    def generate(self, prompt: str, out_mp4: Path, seed: int) -> None:
-        res = self._post("/prompt", {"prompt": self._workflow(prompt, seed),
+    def generate(self, prompt: str, out_mp4: Path, seed: int,
+                 length: int | None = None) -> None:
+        eff_length = int(length) if length else self.length
+        res = self._post("/prompt", {"prompt": self._workflow(prompt, seed, eff_length),
                                      "client_id": uuid.uuid4().hex})
         if res.get("node_errors"):
             raise StageError(STAGE, f"ComfyUI rejected the workflow: "
@@ -181,11 +184,11 @@ def build(fcfg: dict) -> ComfyBroll:
     b = (fcfg.get("broll") or {})
     return ComfyBroll(
         url=str(b.get("comfy_url", "http://127.0.0.1:8188")),
-        # Default = the 8-step DISTILLED 2B: ~65-80s/clip vs ~112s for the
-        # 20-step base on 8 GB (~1.6x faster; the fixed T5-encode + VAE-decode
-        # overhead is what keeps it from being dramatic), equal-or-better
-        # quality. Distilled needs cfg=1.0 (guidance baked in) and 8 steps. To
-        # use the base 0.9.5 instead, set checkpoint back + steps: 20, cfg: 3.0.
+        # Default = the 8-step DISTILLED 2B: warm ~25-45s/clip on 8 GB (scales
+        # with the per-scene clip length; +~100s one-time warmup per session),
+        # equal-or-better quality, and far faster than the 20-step base
+        # (~112s/clip measured). Distilled needs cfg=1.0 (guidance baked in) and
+        # 8 steps. Base 0.9.5 instead: set checkpoint back + steps: 20, cfg: 3.0.
         checkpoint=str(b.get("checkpoint", "ltxv-2b-0.9.6-distilled-04-25.safetensors")),
         t5=str(b.get("t5", "t5xxl_fp8_e4m3fn.safetensors")),
         width=int(b.get("width", 768)),
@@ -196,7 +199,22 @@ def build(fcfg: dict) -> ComfyBroll:
         cfg=float(b.get("cfg", 1.0)),
         sampler=str(b.get("sampler", "euler")),
         negative=str(b.get("negative", DEFAULT_NEGATIVE)),
+        max_seconds=float(b.get("max_seconds", 8.0)),
     )
+
+
+def frames_for_duration(seconds: float, fps: int, *, min_seconds: float = 1.0,
+                        max_seconds: float = 8.0) -> int:
+    """Frames for a clip covering `seconds`, snapped UP to LTX's required
+    8*k+1 length and clamped to [min_seconds, max_seconds]. Snapping up (then
+    the render trims to the exact scene duration) means the clip is never
+    shorter than the scene, so the render never has to freeze the last frame
+    (render_ffmpeg tpad=clone). The max cap bounds both generation time and
+    VRAM on long scenes."""
+    s = max(float(min_seconds), min(float(seconds or 0.0), float(max_seconds)))
+    target = max(1, round(s * fps))
+    k = max(1, -(-(target - 1) // 8))   # ceil((target - 1) / 8)
+    return 8 * k + 1
 
 
 def prompt_for_scene(scene: dict) -> str:

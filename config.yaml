@@ -45,18 +45,22 @@ footage:
                                      # output MUST be labeled AI-generated at publish.
   broll:                             # generated-B-roll settings (only used when ai_broll: true)
     comfy_url: "http://127.0.0.1:8188"     # headless ComfyUI REST API
-    # Default = 8-step DISTILLED 2B: ~70s/clip on 8GB (vs ~112s for the 20-step
-    # base — ~1.6x faster), equal-or-better quality. For the base model set
-    # checkpoint: "ltx-video-2b-v0.9.5.safetensors" AND steps: 20, cfg: 3.0.
+    # Default = 8-step DISTILLED 2B: warm ~25-45s/clip on 8GB (scales with the
+    # per-scene clip length), far faster than the 20-step base (~112s), equal-
+    # or-better quality. Base instead: checkpoint "ltx-video-2b-v0.9.5.safetensors"
+    # + steps: 20, cfg: 3.0.
     checkpoint: "ltxv-2b-0.9.6-distilled-04-25.safetensors"
     t5: "t5xxl_fp8_e4m3fn.safetensors"
     width: 768
     height: 512
-    length: 97                       # frames (must be 8*k+1); ~length/fps seconds
+    length: 97                       # FALLBACK frames (8*k+1) when a scene's
+                                     # duration is unknown; normally each clip's
+                                     # length is matched to its scene (see max_seconds)
     fps: 25
     steps: 8                         # distilled: 8 is the sweet spot (more won't help)
     cfg: 1.0                         # distilled bakes in guidance -> cfg 1.0 (no CFG)
     sampler: "euler"
+    max_seconds: 8.0                 # cap per-scene clip length (generation speed + 8GB VRAM)
     # See docs/ai-video/GENERATED_BROLL.md for setup + the speed/quality knobs.
 
 captions:
