@@ -40,7 +40,21 @@ footage:
   min_height: 1080
   orientation: "portrait"            # derived from aspect_ratio if omitted
   used_clip_log: "assets/used_clips.json"
-  ai_broll: false                    # if true, output must be labeled as AI-generated
+  ai_broll: false                    # true = generate B-roll locally via ComfyUI
+                                     # (see broll below) instead of stock search;
+                                     # output MUST be labeled AI-generated at publish.
+  broll:                             # generated-B-roll settings (only used when ai_broll: true)
+    comfy_url: "http://127.0.0.1:8188"     # headless ComfyUI REST API
+    checkpoint: "ltx-video-2b-v0.9.5.safetensors"
+    t5: "t5xxl_fp8_e4m3fn.safetensors"
+    width: 768
+    height: 512
+    length: 97                       # frames (must be 8*k+1); ~length/fps seconds
+    fps: 25
+    steps: 20                        # fewer = faster, lower quality (~112s/clip @20 on 8GB)
+    cfg: 3.0
+    sampler: "euler"
+    # See docs/ai-video/GENERATED_BROLL.md for setup + the speed/quality knobs.
 
 captions:
   font: "Tajawal"

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import os
+import random
 import time
 from dataclasses import dataclass
 from datetime import date
@@ -309,6 +310,11 @@ def run(project: Project, cfg: dict, env: dict, *, force: bool = False) -> None:
     ):
         return
 
+    # Generated B-roll (fixed cost) replaces stock search when enabled.
+    if fcfg.get("ai_broll"):
+        _run_generated(project, scenes, fcfg, force)
+        return
+
     providers = _build_providers(names, env)
 
     orientation = fcfg.get("orientation") or _orientation_from_aspect(
@@ -343,6 +349,36 @@ def run(project: Project, cfg: dict, env: dict, *, force: bool = False) -> None:
             "duration_s": cand.duration_s,
         }
 
+    project.write_json(FOOTAGE_REPORT,
+                       [entries[k] for k in sorted(entries)])
+
+
+def _run_generated(project: Project, scenes: list[dict], fcfg: dict,
+                   force: bool) -> None:
+    """Generate each scene's clip with ComfyUI + LTX-Video instead of searching
+    stock. Per-scene failures are recorded (status "error") and the stage
+    continues, so one bad scene never aborts the batch and the human sees it at
+    gate 2; flip footage.ai_broll off to fall back to stock. A random per-clip
+    seed means `redo` yields a fresh take."""
+    from pipeline import broll_comfy  # lazy: optional feature, no hard dependency
+
+    gen = broll_comfy.build(fcfg)
+    entries = _load_report_entries(project)
+    for scene in scenes:
+        sid = scene["id"]
+        if not force and project.clip_for_scene(sid) is not None:
+            entries.setdefault(sid, {"scene": sid, "status": "exists"})
+            continue
+        prompt = broll_comfy.prompt_for_scene(scene)
+        out = project.clips_dir / f"scene_{sid:03d}.mp4"
+        try:
+            gen.generate(prompt, out, seed=random.randint(0, 2**31 - 1))
+            entries[sid] = {"scene": sid, "status": "generated",
+                            "provider": "comfyui-ltxv", "prompt": prompt}
+        except StageError as exc:
+            entries[sid] = {"scene": sid, "status": "error",
+                            "provider": "comfyui-ltxv", "prompt": prompt,
+                            "error": str(exc)}
     project.write_json(FOOTAGE_REPORT,
                        [entries[k] for k in sorted(entries)])
 
