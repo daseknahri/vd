@@ -352,8 +352,11 @@ def _quote_concat(path: Path) -> str:
 
 def _concat_mp3s(scene_paths: list[Path], out_path: Path, workdir: Path) -> None:
     list_path = workdir / "concat.txt"
+    # Absolute paths: the concat demuxer resolves relative `file` entries against
+    # the concat.txt's own directory, which doubles a project-relative path
+    # (voice_tmp/projects/.../voice_tmp/...). Absolute paths are unambiguous.
     list_path.write_text(
-        "".join(f"file '{_quote_concat(p)}'\n" for p in scene_paths),
+        "".join(f"file '{_quote_concat(p.resolve())}'\n" for p in scene_paths),
         encoding="utf-8",
     )
     cmd = [
@@ -397,7 +400,15 @@ def run(project: contract.Project, cfg: dict, env: dict, *,
         )
     script = project.script()
     provider = _build_provider(cfg, env)
-    _synthesize_project(project, script, provider)
+    try:
+        _synthesize_project(project, script, provider)
+    finally:
+        # Release any GPU/worker the provider holds (e.g. the Chatterbox worker
+        # keeps ~3 GB of VRAM resident) so the next stage — generated B-roll on
+        # the same 8 GB GPU — isn't starved. No-op for ElevenLabs (no close()).
+        close = getattr(provider, "close", None)
+        if callable(close):
+            close()
 
 
 def _synthesize_project(project: contract.Project, script: dict,

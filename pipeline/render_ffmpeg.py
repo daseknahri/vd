@@ -306,14 +306,17 @@ def _write_caption_list(segments: list[tuple[Path | None, float]],
     last: Path | None = None
     for png, dur in segments:
         p = gap_png if png is None else png
-        lines.append(f"file '{_quote_concat(p)}'")
+        # Absolute: ffconcat resolves relative `file` entries against the list
+        # file's own directory, doubling a project-relative path (render_work/
+        # projects/.../render_work/_gap.png) when the project dir is relative.
+        lines.append(f"file '{_quote_concat(p.resolve())}'")
         lines.append(f"duration {dur:.6f}")
         last = p
     # repeat the last file so its duration is honoured (concat demuxer
     # convention) and the track EOFs at total duration, not earlier —
     # the overlay runs with shortest=1.
     if last is not None:
-        lines.append(f"file '{_quote_concat(last)}'")
+        lines.append(f"file '{_quote_concat(last.resolve())}'")
     list_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 

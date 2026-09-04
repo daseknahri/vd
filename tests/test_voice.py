@@ -7,6 +7,7 @@ import copy
 import json
 import shutil
 import subprocess
+from pathlib import Path
 
 import pytest
 import requests
@@ -430,6 +431,27 @@ def test_concat_handles_apostrophe_in_path(tmp_path):
     )
     out = work / "voiceover.mp3"
     voice._concat_mp3s([p], out, work)
+    assert out.exists() and out.stat().st_size > 0
+
+
+def test_concat_with_relative_input_path(tmp_path, monkeypatch):
+    """Regression: `run.py process projects\\<slug>` makes scene paths project-
+    relative. The concat list must hold ABSOLUTE paths, else ffmpeg's demuxer
+    resolves them against the list file's own dir and doubles them
+    (voice_tmp/proj/voice_tmp/scene_001.mp3 -> not found)."""
+    ffmpeg = contract.ffmpeg_path("ffmpeg")
+    monkeypatch.chdir(tmp_path)
+    work = Path("proj") / "voice_tmp"
+    work.mkdir(parents=True)
+    p = work / "scene_001.mp3"          # relative path, as the live pipeline uses
+    subprocess.run(
+        [ffmpeg, "-y", "-hide_banner", "-loglevel", "error",
+         "-f", "lavfi", "-i", "sine=frequency=440:duration=0.3",
+         "-c:a", "libmp3lame", str(p)],
+        check=True, capture_output=True,
+    )
+    out = work / "voiceover.mp3"
+    voice._concat_mp3s([p], out, work)  # would fail on the doubled path pre-fix
     assert out.exists() and out.stat().st_size > 0
 
 
