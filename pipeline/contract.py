@@ -162,7 +162,7 @@ def validate_script(data: dict[str, Any]) -> dict[str, Any]:
         meta: { source_url, audience, dialect, target_seconds }
         hook: str
         scenes: [ { id, narration_ar, keywords: [[...], ...],
-                    mood, target_seconds } ]
+                    mood, target_seconds, broll_prompt? } ]
         post: { title, description, hashtags }
     """
     if not isinstance(data, dict):
@@ -215,6 +215,15 @@ def validate_script(data: dict[str, Any]) -> dict[str, Any]:
         ts = scene.get("target_seconds")
         if not isinstance(ts, (int, float)) or ts <= 0:
             raise ContractError(f"script.json: {where}.target_seconds must be > 0")
+        # Optional: a descriptive English prompt for generated B-roll
+        # (footage.ai_broll). Ignored by the stock path; used verbatim by
+        # pipeline/broll_comfy.prompt_for_scene when present.
+        bp = scene.get("broll_prompt")
+        if bp is not None and (not isinstance(bp, str) or not bp.strip()):
+            raise ContractError(
+                f"script.json: {where}.broll_prompt, if present, must be a "
+                f"non-empty string"
+            )
 
     post = data.get("post")
     if not isinstance(post, dict):

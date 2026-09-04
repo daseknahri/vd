@@ -21,6 +21,12 @@ def test_prompt_for_scene_handles_empty_keywords():
     assert isinstance(p, str) and len(p) > 0
 
 
+def test_prompt_for_scene_prefers_explicit_broll_prompt():
+    p = broll_comfy.prompt_for_scene(
+        {"keywords": [["ignored"]], "mood": "calm", "broll_prompt": "MY CUSTOM PROMPT"})
+    assert p == "MY CUSTOM PROMPT"
+
+
 # -- build / config ------------------------------------------------------------
 def test_build_defaults():
     g = broll_comfy.build({})

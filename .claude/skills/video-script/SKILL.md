@@ -117,6 +117,27 @@ order by the footage stage. Each set is 1 list of 2–4 ENGLISH words.
 - `mood` must be one of `archival | energetic | calm` — pick per scene,
   and let it vary with the arc (hook is rarely `calm`).
 
+## Generated B-roll prompt (optional — only when generating footage locally)
+
+When the channel generates B-roll on the GPU instead of pulling stock
+(`footage.ai_broll: true`, see `docs/ai-video/GENERATED_BROLL.md`), each scene
+may carry an optional `broll_prompt`: a descriptive English text-to-video prompt
+used verbatim by the generator. The video model (LTX-Video) rewards **long,
+descriptive** prompts, so the terse `keywords` (perfect for stock search) are
+too thin on their own. Write `broll_prompt` for generated-footage channels;
+omit it for stock-only projects (the terse keywords still work there).
+
+- One or two vivid English sentences: **subject + setting + camera motion +
+  lighting + style** — e.g. *"A slow cinematic aerial push-in over rolling
+  desert dunes at golden hour, wind-blown sand, warm low sun, soft haze, smooth
+  drone motion, photorealistic, shallow depth of field, 4k."*
+- Describe **motion** — it is a video clip, not a still.
+- Keep it **faceless and clean**: no recognizable real people or faces, no
+  on-screen text / captions / watermarks / logos (captions are burned in later
+  and would clash), no brand marks.
+- Match the scene's `mood`, and the same literal subject as `keywords[0]` —
+  `broll_prompt` is the rich, cinematic version of that ideal shot.
+
 ## Post block
 
 - `title`: ≤ 60 chars, Arabic, states the idea's tension honestly — no
@@ -144,6 +165,17 @@ Write `projects/<slug>/script.json`, UTF-8, `ensure_ascii=False` style
 }
 ```
 
+`broll_prompt` is the only optional per-scene field — add it (a descriptive
+English string, see the B-roll section above) ONLY when generating footage
+locally; otherwise omit it. A scene carrying it looks like:
+
+```json
+    { "id": 1, "narration_ar": "...",
+      "keywords": [["aerial desert highway", "sunset"]],
+      "mood": "energetic", "target_seconds": 8,
+      "broll_prompt": "A slow cinematic aerial push-in over a lone desert highway at sunset, long shadows, warm haze, gentle drone motion, photorealistic, 4k" }
+```
+
 `meta.source_url` provenance: URL-first → the real source URL (from
 `source_url.txt`); topic-first → `topic://` followed by the topic
 (e.g. `"topic://حقائق عن الصحراء"`), so the origin is always recorded.
@@ -165,6 +197,8 @@ command — never put Arabic in a shell string):
 6. Zero banned phrases anywhere (scan narration + post block).
 7. Numbers TTS-safe; foreign names have pronunciation.json entries.
 8. validate_script passes.
+9. Generated-footage projects (`ai_broll`): every scene has a faceless,
+   text-free `broll_prompt`; stock-only projects omit it.
 
 Then tell the user the script is ready for **gate 1**: they read it, and
 approve with `python run.py approve projects/<slug> --gate 1`.

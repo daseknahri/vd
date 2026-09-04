@@ -102,12 +102,14 @@ quality/photoreal humans, **Wan 2.2** is the heavier alternative (tighter on
 8 GB); for paid speed/quality, the connected Higgsfield MCP (per-second cost,
 breaks fixed-cost — opt-in only).
 
-## Must-do before publishing AI B-roll
+## AI-generated labeling
 
-Platforms require AI-generated content to be **labeled**. `footage_report.json`
-records `status: "generated"`; the publish step must set an AI-generated flag on
-`post.json` when any scene was generated. (Not yet wired — publishing is
-deferred by Hard Rule 2 regardless.)
+Platforms require AI-generated content to be **labeled** — and this is already
+wired: `publish.py` sets `needs_ai_label: true` in `post.json` whenever
+`footage.ai_broll` is on, and `footage_report.json` records each scene's
+`status: "generated"`. When auto-posting is eventually built (deferred by Hard
+Rule 2), it must apply the platform's AI-generated label when `needs_ai_label`
+is true; until then, tick that label by hand when you post.
 
 ## Troubleshooting
 
