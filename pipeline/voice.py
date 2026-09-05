@@ -187,9 +187,15 @@ def _build_provider(cfg: dict, env: dict) -> TTSProvider:
         from pipeline import chatterbox_tts
         return chatterbox_tts.build(voice_cfg, env)
 
+    if name == "silma":
+        # Reliable self-hosted Arabic TTS (its own venv). Diacritizes internally;
+        # alignment via the pipeline's faster-whisper (transcribe.*).
+        from pipeline import silma_tts
+        return silma_tts.build(voice_cfg, env, cfg.get("transcribe"))
+
     raise ContractError(
         f"config: voice.provider '{name}' is not implemented "
-        f"(supported: 'elevenlabs', 'chatterbox')"
+        f"(supported: 'elevenlabs', 'chatterbox', 'silma')"
     )
 
 
@@ -531,15 +537,23 @@ def _synthesize_project(project: contract.Project, script: dict,
     # Auto-diacritize (CATT) so the TTS pronounces correctly; best-effort and
     # per-scene, falling back to plain text where unavailable. Overrides + display
     # spelling are handled inside _spoken_text.
-    diacritize_on = (voice_cfg or {}).get("diacritize", True)
-    diacritized = (diacritize.diacritize_batch(narrations)
-                   if diacritize_on else [None] * len(narrations))
-    spoken = [_spoken_text(n, overrides, diacritized[i])
-              for i, n in enumerate(narrations)]
-    # Plain (undiacritized) spoken text per scene — the ramble guard's fallback.
-    spoken_plain = [_spoken_text(n, overrides) for n in narrations]
+    provider_name = str((voice_cfg or {}).get("provider", "")).strip().lower()
+    if provider_name == "silma":
+        # SILMA diacritizes internally (CATT) and is stable — send plain text and
+        # skip our diacritization + ramble guard (both Chatterbox-only workarounds).
+        spoken = list(narrations)
+        spoken_plain = spoken
+        ramble_guard = False
+    else:
+        diacritize_on = (voice_cfg or {}).get("diacritize", True)
+        diacritized = (diacritize.diacritize_batch(narrations)
+                       if diacritize_on else [None] * len(narrations))
+        spoken = [_spoken_text(n, overrides, diacritized[i])
+                  for i, n in enumerate(narrations)]
+        # Plain (undiacritized) spoken text per scene — the ramble guard's fallback.
+        spoken_plain = [_spoken_text(n, overrides) for n in narrations]
+        ramble_guard = diacritize_on and (voice_cfg or {}).get("ramble_guard", True)
     delivery_cfg = (voice_cfg or {}).get("delivery")
-    ramble_guard = diacritize_on and (voice_cfg or {}).get("ramble_guard", True)
 
     tmp_dir = project.path(_TMP_DIR)
     tmp_dir.mkdir(exist_ok=True)

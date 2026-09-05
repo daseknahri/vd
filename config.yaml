@@ -61,6 +61,26 @@ voice:
     #   warm, consistent narrator instead of the flat default voice. Leave ""
     #   until you have a reference you have rights to. See SELF_HOSTED_TTS.md.
 
+  # --- Reliable self-hosted Arabic TTS (fixed cost). Set provider: "silma".
+  #     SILMA (silma-ai/silma-tts, MIT/Apache, F5-diffusion) is purpose-built for
+  #     Arabic: it diacritizes internally (CATT) and stays stable where Chatterbox
+  #     loops. Runs in ITS OWN venv (D:\silma-tts\.venv) via scripts/silma_worker.py;
+  #     word timing is recovered by the pipeline's faster-whisper (transcribe.*).
+  #     Our diacritize/ramble_guard are skipped for silma (it handles tashkeel).
+  silma:
+    # silma_python: 'D:\silma-tts\.venv\Scripts\python.exe'  # its venv (default;
+    #   else set env VD_SILMA_PYTHON). build() falls back to it.
+    # hf_home: 'D:\vd-ai\models'    # model weights cache (silma-ai/silma-tts, ~600MB)
+    ref_file: ""                # "" = SILMA's bundled Arabic reference voice.
+                                #   Point at an 8-15s clean single-speaker clip to
+                                #   clone a chosen narrator (also set ref_text).
+    ref_text: ""                # transcript of ref_file (required if ref_file set)
+    seed: 0                     # >0 = reproducible audio (keeps voice_cache stable)
+    nfe_step: 16                # diffusion steps (quality/speed; 16 is the default)
+    cfg_strength: 2.0           # guidance
+    speed: 1.0
+    force_tashkeel: true        # let SILMA add diacritics (its reliable path)
+
   # Per-scene expressive delivery + designed pauses. Maps each scene's `mood`
   # to Chatterbox emotion params and the breath AFTER the scene, so the read
   # follows the emotional arc instead of a flat monotone. KEY RULE (research):

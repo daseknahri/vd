@@ -248,6 +248,25 @@ def test_ramble_guard_falls_back_to_plain(tmp_path, monkeypatch):
     assert "مرحبا بكم في المصنعَ" in sent   # the rambling diacritized take was tried first
 
 
+def test_run_silma_sends_plain_text_no_diacritize(tmp_path, monkeypatch):
+    project = _make_project(tmp_path)
+    fake = FakeTTS()
+    monkeypatch.setattr(voice, "_build_provider", lambda cfg, env: fake)
+    monkeypatch.setattr(voice, "_probe_duration", lambda p: 2.0)
+    monkeypatch.setattr(voice, "_concat_mp3s", _stub_concat)
+
+    def _no_diac(texts):
+        raise AssertionError("diacritize must not run for the silma provider")
+    monkeypatch.setattr(voice.diacritize, "diacritize_batch", _no_diac)
+
+    voice.run(project, {"voice": {"provider": "silma"}}, ENV)
+
+    # SILMA diacritizes internally -> plain narrations are sent verbatim
+    sent = [c[0] for c in fake.calls]
+    assert "مرحبا بكم في المصنع" in sent
+    assert "هذه خوارزمية، مذهلة حقا" in sent
+
+
 def test_run_writes_voice_report_with_char_counts(tmp_path, patched):
     project = _make_project(tmp_path)
     voice.run(project, CFG, ENV)
