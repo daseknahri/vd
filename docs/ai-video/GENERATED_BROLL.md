@@ -127,6 +127,24 @@ is true; until then, tick that label by hand when you post.
 
 - **`StageError: ComfyUI not reachable`** — start the server (above); check
   `comfy_url`.
+- **`StageError: generated B-roll failed for ALL N scenes` / a blank
+  (placeholder-only) render with `footage_report.json` all `status: "error"`,
+  error `produced no image/video output`, each failing in ~1 s** — the server
+  answering on `:8188` is broken, most often a **second ComfyUI launched with
+  the wrong Python** grabbing the port. Its CUDA torch can't sample, so every
+  KSampler dies instantly (`OSError [Errno 22]`) and (before the guard) the
+  render silently used placeholders. There must be exactly ONE ComfyUI, from
+  the `D:\vd-ai\ComfyUI\venv` interpreter. Recover:
+  ```powershell
+  # kill every ComfyUI, then relaunch only the venv one
+  Get-CimInstance Win32_Process -Filter "Name='python.exe'" |
+    Where-Object { $_.CommandLine -match 'main\.py' } |
+    ForEach-Object { Stop-Process -Id $_.ProcessId -Force }
+  D:\vd-ai\ComfyUI\venv\Scripts\python.exe D:\vd-ai\ComfyUI\main.py --port 8188
+  ```
+  Then confirm health: `GET /system_stats` must list a device of `type: cuda`
+  (not CPU). `footage.run` now aborts loudly (not silently) when every
+  generated scene fails, so this can't reach gate 2 as a blank video.
 - **ComfyUI won't start, `infer_schema ... list[int]`** — torch too old for
   `comfy-kitchen`; install `torch>=2.7` (cu128).
 - **`ModuleNotFoundError: pkg_resources`** — `uv pip install "setuptools<81"`.

@@ -44,6 +44,7 @@ footage:
                                      # (see broll below) instead of stock search;
                                      # output MUST be labeled AI-generated at publish.
   broll:                             # generated-B-roll settings (only used when ai_broll: true)
+    engine: "video"                  # "video" = LTX photoreal clips; "image" = SDXL storybook illustration + Ken Burns
     comfy_url: "http://127.0.0.1:8188"     # headless ComfyUI REST API
     # Default = 8-step DISTILLED 2B: warm ~25-45s/clip on 8GB (scales with the
     # per-scene clip length), far faster than the 20-step base (~112s), equal-
@@ -61,6 +62,19 @@ footage:
     cfg: 1.0                         # distilled bakes in guidance -> cfg 1.0 (no CFG)
     sampler: "euler"
     max_seconds: 8.0                 # cap per-scene clip length (generation speed + 8GB VRAM)
+    # --- engine "image": SDXL + storybook LoRA still -> ffmpeg Ken Burns pan.
+    #     Generates one hand-drawn watercolor illustration per scene (fixed-cost).
+    image:
+      checkpoint: "sd_xl_base_1.0.safetensors"
+      lora: "StickersRedmond.safetensors"   # clean bold outlines + flat cel color (light look)
+      lora_strength: 0.72            # keep <=0.75 to avoid a die-cut "sticker rim"
+      vae: "sdxl_vae.safetensors"    # fp16-fix VAE (avoids black frames)
+      width: 768                     # SDXL 9:16 latent bucket
+      height: 1344
+      steps: 26
+      cfg: 6.0                       # flat color bands/oversaturates at higher cfg
+      sampler: "dpmpp_2m"
+      scheduler: "karras"
     # See docs/ai-video/GENERATED_BROLL.md for setup + the speed/quality knobs.
 
 captions:

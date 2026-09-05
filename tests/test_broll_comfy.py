@@ -178,6 +178,27 @@ def test_footage_run_ai_broll_records_error_and_continues(monkeypatch, tmp_path)
     assert not (tmp_path / "clips" / "scene_001.mp4").exists()
 
 
+def test_footage_run_ai_broll_raises_when_all_scenes_fail(monkeypatch, tmp_path):
+    # One flagged scene continues (test above); a TOTAL wipeout (ComfyUI down/
+    # broken) must fail loudly, else the render ships an all-placeholder video.
+    project = contract.Project(dir=tmp_path)
+    project.write_json(contract.SCRIPT, _script([_scene(1), _scene(2)]))
+
+    class FailGen:
+        fps, max_seconds, length = 25, 8.0, 97
+
+        def generate(self, prompt, out, seed, length=None):
+            raise StageError("footage", "ComfyUI produced no video output")
+
+    monkeypatch.setattr(broll_comfy, "build", lambda fcfg: FailGen())
+    with pytest.raises(StageError, match="failed for ALL 2 scenes"):
+        footage.run(project, _cfg(), {})
+
+    # the report is still written (both errors recorded) before the raise
+    report = project.read_json(contract.FOOTAGE_REPORT)
+    assert [e["status"] for e in report] == ["error", "error"]
+
+
 # -- per-scene clip length -----------------------------------------------------
 def test_frames_for_duration_snaps_up_to_8k_plus_1_and_covers():
     f = broll_comfy.frames_for_duration(6.0, 25, max_seconds=8.0)  # 150 target

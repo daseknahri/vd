@@ -69,6 +69,58 @@ The transcript is **an idea quarry, not a text to translate**.
   2–4 beats → payoff/twist → a closing thought that completes the idea
   (NOT a call to action). End when the idea ends.
 
+## What makes it GREAT — retention playbook
+
+Structure alone produces a *correct* video; these techniques make one people
+watch to the end and save. The goal is not "a working script" — it is genuinely
+great content. Apply all of these, not just the arc above.
+
+- **Beat sheet (scale to `target_seconds`):** hook (~6%) → context, who/why-care
+  (~8%) → escalation: 2–4 compounding **"but"** beats, each landing *worse* than
+  the last (~30%) → the **pivot**, the surprising turn/observation, which MUST
+  land at or before the midpoint (~9%) → **proof**: 1–2 concrete micro-payoffs
+  that show the idea in miniature *before* you name it (~17%) → **payoff**: the
+  idea stated plainly (~13%) → closing thought: a resonant callback, no CTA
+  (~8%). Scene count stays the existing 6–12; these are proportions, not new
+  fields.
+- **"But / therefore," never "and then":** before writing scene N+1, say the
+  join out loud. If the only word that fits between scene N and N+1 is "then"
+  (ثم), the beats are a timeline, not a story — rewrite N+1 as a complication
+  (لكن) or a consequence (لذلك) of N. If a reader could reorder your scenes
+  without breaking anything, there is no causal chain.
+- **Open a curiosity gap in the hook, close it at the end.** State the viewer's
+  own unresolved stakes (a question, a withheld cause, a cold-open into the
+  darkest concrete moment) — never bio/setup first. The tension you open is a
+  debt; the payoff pays it. Do not open a loop the content cannot pay off.
+- **Re-hook every 10–15s.** Every scene cut is already a pattern interrupt (new
+  image, new pan) — but also plant 2–3 *small* open loops beyond the main hook
+  (an unanswered "why", a foreshadowed detail) so a viewer drifting at second 40
+  gets a fresh reason to stay. Never run a single unbroken exposition stretch
+  longer than ~40s of runtime; break it with a re-hook.
+- **Escalate, don't list.** If two scenes in the escalation block could swap
+  order without weakening the video, they aren't escalating — make each loss or
+  stake land heavier than the one before.
+- **Proof before payoff.** Land 1–2 small, concrete relief beats before the big
+  abstract idea — an unbroken build with zero relief loses viewers before they
+  reach the point.
+- **The payoff is a reframe, not a fact.** Name a principle the viewer can apply
+  to their *own* life, not trivia about the subject. Aim it at awe or moral
+  elevation (the emotions most correlated with sharing), and land it as one
+  short, quotable line — assume someone screenshots only your last sentence.
+- **Close with a callback, never a CTA.** Answer, echo, or re-pose the hook's
+  exact question (bookend). A closed loop invites a mental — or literal —
+  rewatch; a bolted-on «شاركونا رأيكم» never does. Stop the instant the
+  resonant line lands; no coda after it.
+- **Sentence-length variance = caption cadence.** Alternate short declaratives
+  with longer elaborative sentences; short lines double as natural caption/edit
+  points. Three-plus long sentences in a row flattens the karaoke rhythm.
+- **Arabic-specific:** classical parallelism (balanced, similar-length clauses,
+  الموازنة) is worth using *structurally* at the hook and closing line
+  specifically, where quotability matters most — never as fancy vocabulary
+  across the body (literary stiffness stays banned). Arabic reads heavier per
+  word than English, so bias to the short end of the 2.2–2.6 words/sec range at
+  the hook and re-hook beats.
+
 ## Language register
 
 - `meta.dialect` is set once and never mixed. Default `MSA`: modern,
@@ -138,6 +190,42 @@ omit it for stock-only projects (the terse keywords still work there).
 - Match the scene's `mood`, and the same literal subject as `keywords[0]` —
   `broll_prompt` is the rich, cinematic version of that ideal shot.
 
+**Attention upgrades** — a technically correct clip can still fail to stop the
+scroll. The prompt's job is grabbing and holding *human* attention, not looking
+"pretty":
+
+- **Match the engine actually rendering it.** Two engines exist (`footage.broll.engine`):
+  - `video` (LTX) — photoreal moving clips: reward the cinematography language
+    above (camera motion, lighting, "photorealistic, 4k").
+  - `image` (SDXL storybook, `pipeline/broll_image.py`) — one illustrated still
+    per scene, panned by Ken Burns. It has a FIXED style baked in (flat
+    cel-shaded, bold ink outlines, pastel, vector-clean) and a negative prompt
+    that suppresses "watercolor", "painterly", "dark/moody/dramatic shadows",
+    and "cluttered/busy" detail. For `image` projects those words are dead
+    weight — never spend the prompt on texture, film-camera, or darkness; spend
+    it on the bullets below. (The engine also strips any `"STYLE — CONTENT"`
+    lead-in, so lead with the content.)
+- **One dominant subject, one explicit action or expression.** Never "a scene
+  showing X and Y and Z" — two competing focal points read as clutter at feed
+  speed. Isolate the subject against a simplified field for contrast pull.
+- **Push the emotion past neutral.** State the exact expression/posture for the
+  beat ("eyes wide with wonder", "shoulders slumped, head down", "a small
+  hopeful smile") — the default character look reads as generically friendly,
+  which under-sells a tension or despair beat. Small-screen + scroll speed needs
+  caricature-level clarity, not subtlety.
+- **Carry mood with palette + symbolism, not darkness.** One colour-temperature
+  choice per scene (warm gold = hope/payoff; muted cool gray-blue = loss/
+  tension), plus symbolic distance for heavy material (silhouettes, "no visible
+  faces, symbolic and tasteful"). This is how the `image` engine conveys a dark
+  beat when it cannot use dark lighting.
+- **Leave an explicit empty landing zone in the upper two-thirds** ("plain sky
+  above", "bare wall behind"). Captions burn into roughly the lower quarter, and
+  the `image` still is panned ~18% oversized in a random diagonal direction, so
+  the subject needs safe margin on all four sides — not rule-of-thirds room
+  aimed one way.
+- **One-glance test:** if parsing the frame would take a viewer more than a
+  second, cut detail rather than add description.
+
 ## Post block
 
 - `title`: ≤ 60 chars, Arabic, states the idea's tension honestly — no
@@ -190,7 +278,8 @@ command — never put Arabic in a shell string):
 ## Self-check before declaring done
 
 1. Originality: no scene maps 1:1 to a transcript paragraph.
-2. Hook ≤ 3s, opens scene 1 verbatim, no banned opening.
+2. Hook ≤ 3s, opens scene 1 verbatim, no banned opening, and opens a curiosity
+   gap (stakes/question/withheld cause) — not bio or setup.
 3. One register throughout; read-aloud test passes.
 4. Word count per scene ≈ 2.2–2.6 × target_seconds; total within ±10%.
 5. Every keyword set is a literal visual; homonyms disambiguated.
@@ -199,6 +288,14 @@ command — never put Arabic in a shell string):
 8. validate_script passes.
 9. Generated-footage projects (`ai_broll`): every scene has a faceless,
    text-free `broll_prompt`; stock-only projects omit it.
+10. **Retention:** scene joins are "but/therefore", not "and then" (scenes
+    can't be freely reordered); the pivot lands by the midpoint; 1–2 proof
+    beats precede the payoff; the payoff is a quotable reframe; the close
+    callbacks the hook. No unbroken exposition stretch over ~40s.
+11. **Attention (image engine):** each `broll_prompt` has one dominant subject
+    with an explicit expression/posture, mood carried by palette/symbolism (not
+    "dark/dramatic"/texture words), and an empty landing zone in the upper
+    two-thirds.
 
 Then tell the user the script is ready for **gate 1**: they read it, and
 approve with `python run.py approve projects/<slug> --gate 1`.

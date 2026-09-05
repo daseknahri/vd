@@ -360,13 +360,22 @@ def _run_generated(project: Project, scenes: list[dict], fcfg: dict,
     continues, so one bad scene never aborts the batch and the human sees it at
     gate 2; flip footage.ai_broll off to fall back to stock. A random per-clip
     seed means `redo` yields a fresh take."""
-    from pipeline import broll_comfy  # lazy: optional feature, no hard dependency
+    # Two generation engines behind the same footage stage:
+    #   video (default) -> LTX-Video photoreal clips (pipeline/broll_comfy)
+    #   image           -> SDXL storybook illustration + Ken Burns (pipeline/broll_image)
+    # Lazy import so the pipeline venv never hard-depends on either.
+    engine = str((fcfg.get("broll") or {}).get("engine", "video")).strip().lower()
+    if engine == "image":
+        from pipeline import broll_image as gg
+        provider_name = "comfyui-sdxl"
+    else:
+        from pipeline import broll_comfy as gg
+        provider_name = "comfyui-ltxv"
+    gen = gg.build(fcfg)
 
-    gen = broll_comfy.build(fcfg)
-    # Match each clip's length to its scene's real duration so the render never
-    # freezes a too-short clip (render_ffmpeg tpad=clone). Voice runs before
-    # footage, so timing.json exists in the normal flow; fall back to the
-    # script's target_seconds otherwise.
+    # Match each clip to its scene's real duration so the render never freezes a
+    # too-short clip (render_ffmpeg tpad=clone). Voice runs before footage, so
+    # timing.json exists in the normal flow; fall back to script target_seconds.
     durations = _scene_durations(project)
     entries = _load_report_entries(project)
     for scene in scenes:
@@ -374,21 +383,50 @@ def _run_generated(project: Project, scenes: list[dict], fcfg: dict,
         if not force and project.clip_for_scene(sid) is not None:
             entries.setdefault(sid, {"scene": sid, "status": "exists"})
             continue
-        prompt = broll_comfy.prompt_for_scene(scene)
+        prompt = gg.prompt_for_scene(scene)
         dur = durations.get(sid) or float(scene.get("target_seconds") or 0) or 4.0
-        length = broll_comfy.frames_for_duration(dur, gen.fps, max_seconds=gen.max_seconds)
         out = project.clips_dir / f"scene_{sid:03d}.mp4"
+        seed = random.randint(0, 2**31 - 1)
         try:
-            gen.generate(prompt, out, seed=random.randint(0, 2**31 - 1), length=length)
-            entries[sid] = {"scene": sid, "status": "generated",
-                            "provider": "comfyui-ltxv", "prompt": prompt,
-                            "frames": length, "duration_s": round(dur, 2)}
+            if engine == "image":
+                gen.generate(prompt, out, seed=seed, duration=dur)
+                entries[sid] = {"scene": sid, "status": "generated",
+                                "provider": provider_name, "prompt": prompt,
+                                "duration_s": round(dur, 2)}
+            else:
+                length = gg.frames_for_duration(dur, gen.fps, max_seconds=gen.max_seconds)
+                gen.generate(prompt, out, seed=seed, length=length)
+                entries[sid] = {"scene": sid, "status": "generated",
+                                "provider": provider_name, "prompt": prompt,
+                                "frames": length, "duration_s": round(dur, 2)}
         except StageError as exc:
             entries[sid] = {"scene": sid, "status": "error",
-                            "provider": "comfyui-ltxv", "prompt": prompt,
+                            "provider": provider_name, "prompt": prompt,
                             "error": str(exc)}
     project.write_json(FOOTAGE_REPORT,
                        [entries[k] for k in sorted(entries)])
+
+    # Systemic-failure guard. A few flagged scenes are fine — the human sees
+    # them at gate 2. But if EVERY scene we tried to generate this run failed,
+    # the render would silently assemble an all-placeholder video and sail
+    # through to gate 2. That is an infra failure (ComfyUI down, mis-launched
+    # against the wrong venv, or its CUDA context poisoned), not a content gap,
+    # so stop loudly with the first error instead of shipping a blank reel.
+    attempted = [e for e in entries.values()
+                 if e.get("provider") == provider_name
+                 and e.get("status") in ("generated", "error")]
+    failed = [e for e in attempted if e["status"] == "error"]
+    if len(attempted) >= 2 and len(failed) == len(attempted):
+        comfy_url = (fcfg.get("broll") or {}).get("comfy_url",
+                                                  "http://127.0.0.1:8188")
+        raise StageError(
+            STAGE,
+            f"generated B-roll failed for ALL {len(attempted)} scenes — the "
+            f"render would be an all-placeholder video. ComfyUI at {comfy_url} "
+            f"is likely down or broken (check it is the intended GPU venv and "
+            f"its CUDA context is healthy). First error: "
+            f"{failed[0].get('error', '')!r}. "
+            f"See docs/ai-video/GENERATED_BROLL.md")
 
 
 def _scene_durations(project: Project) -> dict[int, float]:
