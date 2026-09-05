@@ -34,6 +34,26 @@ voice:
     exaggeration: 0.5
     cfg_weight: 0.5
     seed: 0                      # >0 = reproducible audio (keeps voice_cache stable)
+    # voice_ref: 'assets/voice/narrator_ar.wav'  # ← biggest quality lever: an
+    #   8-15s clean single-speaker Arabic narrator clip. Cloning it gives a
+    #   warm, consistent narrator instead of the flat default voice. Leave ""
+    #   until you have a reference you have rights to. See SELF_HOSTED_TTS.md.
+
+  # Per-scene expressive delivery + designed pauses. Maps each scene's `mood`
+  # to Chatterbox emotion params and the breath AFTER the scene, so the read
+  # follows the emotional arc instead of a flat monotone. KEY RULE (research):
+  # get intensity from LOWER cfg_weight, not high exaggeration — high
+  # exaggeration speeds Arabic up, wrong for heavy beats. Applied only for the
+  # chatterbox provider; ElevenLabs ignores the per-scene emotion (pauses still
+  # apply). Remove this whole block to fall back to one flat voice, no pauses.
+  delivery:
+    by_mood:                     # mood enum: energetic | archival | calm
+      energetic: { exaggeration: 0.70, cfg_weight: 0.42, pause_after: 0.30 }
+      archival:  { exaggeration: 0.38, cfg_weight: 0.60, pause_after: 0.55 }
+      calm:      { exaggeration: 0.42, cfg_weight: 0.58, pause_after: 0.40 }
+    default:     { exaggeration: 0.50, cfg_weight: 0.50, pause_after: 0.40 }
+    mood_shift_pause: 0.60       # a breath at a real beat change (short-form: keep tight)
+    max_pause: 1.2              # never let a single pause read as dead air
 
 footage:
   providers: ["pexels", "pixabay"]   # tried in order

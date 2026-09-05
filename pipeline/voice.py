@@ -40,9 +40,15 @@ VOICE_REPORT = "voice_report.json"  # stage-private usage record (chars sent)
 
 class TTSProvider(Protocol):
     def synthesize(
-        self, text: str, prev_text: str, next_text: str
+        self, text: str, prev_text: str, next_text: str, *,
+        style: dict[str, Any] | None = None,
     ) -> tuple[bytes, dict[str, Any]]:
         """Return (mp3 bytes, character alignment).
+
+        `style` is an optional per-scene delivery override (e.g.
+        {"exaggeration": 0.7, "cfg_weight": 0.35} for Chatterbox); providers
+        that cannot act on it ignore it. It is part of the cache key, so two
+        scenes with the same text but different delivery cache separately.
 
         Alignment shape: {"characters": [...],
                           "character_start_times_seconds": [...],
@@ -117,8 +123,12 @@ class ElevenLabsTTS:
         }, sort_keys=True)
 
     def synthesize(
-        self, text: str, prev_text: str, next_text: str
+        self, text: str, prev_text: str, next_text: str, *,
+        style: dict[str, Any] | None = None,
     ) -> tuple[bytes, dict[str, Any]]:
+        # `style` (Chatterbox exaggeration/cfg_weight) does not map onto
+        # ElevenLabs voice_settings; per-scene emotion here would use v3 audio
+        # tags in the text instead. Ignored so the interface stays uniform.
         body = {
             "text": text,
             "model_id": self.model_id,
@@ -243,13 +253,15 @@ def scene_characters(
 # --------------------------------------------------------------------------
 
 def _cache_key(signature: str, text: str, prev_text: str,
-               next_text: str) -> str:
+               next_text: str, style: dict[str, Any] | None = None) -> str:
     """Hash of everything that determines the TTS output. Same request ->
     same key -> reuse the stored audio, no new API call. Neighbor text is
     included because it conditions prosody, so editing one scene correctly
-    invalidates its neighbors (not the whole video)."""
+    invalidates its neighbors (not the whole video). Per-scene `style`
+    (delivery params) is included so re-emotioning a scene re-synthesizes it."""
     payload = json.dumps(
-        {"sig": signature, "text": text, "prev": prev_text, "next": next_text},
+        {"sig": signature, "text": text, "prev": prev_text, "next": next_text,
+         "style": style or None},
         ensure_ascii=False, sort_keys=True,
     )
     return hashlib.sha1(payload.encode("utf-8")).hexdigest()
@@ -258,11 +270,12 @@ def _cache_key(signature: str, text: str, prev_text: str,
 def _synthesize_cached(
     provider: TTSProvider, cache_dir: Path, signature: str,
     text: str, prev_text: str, next_text: str,
+    style: dict[str, Any] | None = None,
 ) -> tuple[bytes, dict[str, Any], bool]:
     """(audio, alignment, from_cache). A cache hit costs nothing; a miss
     calls the provider and stores the result. To re-roll audio for identical
     text, delete the voice_cache/ folder."""
-    key = _cache_key(signature, text, prev_text, next_text)
+    key = _cache_key(signature, text, prev_text, next_text, style)
     mp3_path = cache_dir / f"{key}.mp3"
     meta_path = cache_dir / f"{key}.json"
     if mp3_path.exists() and meta_path.exists():
@@ -271,7 +284,7 @@ def _synthesize_cached(
             return mp3_path.read_bytes(), alignment, True
         except (ValueError, OSError):
             pass  # corrupt/partial cache entry -> fall through and re-synthesize
-    audio, alignment = provider.synthesize(text, prev_text, next_text)
+    audio, alignment = provider.synthesize(text, prev_text, next_text, style=style)
     mp3_path.write_bytes(audio)
     meta_path.write_text(json.dumps(alignment, ensure_ascii=False),
                          encoding="utf-8")
@@ -373,6 +386,61 @@ def _concat_mp3s(scene_paths: list[Path], out_path: Path, workdir: Path) -> None
 
 
 # --------------------------------------------------------------------------
+# Per-scene expressive delivery (Chatterbox) + designed inter-scene pauses.
+# Opt-in: with no `voice.delivery` config the whole feature is inert and the
+# stage behaves exactly as before (one global voice, no pauses).
+# --------------------------------------------------------------------------
+
+def _delivery_for_scene(
+    scene: dict[str, Any], next_mood: str | None, dcfg: dict[str, Any] | None,
+) -> tuple[dict[str, Any] | None, float]:
+    """Map a scene's `mood` to (style, pause_after) from `voice.delivery`.
+
+    style = per-scene TTS delivery override (Chatterbox exaggeration/cfg_weight)
+    or None when delivery is unconfigured. pause_after = seconds of silence to
+    fold in AFTER the scene (a breath), bumped when the next scene changes mood
+    (a section break) and capped at `max_pause`. Returns (None, 0.0) when
+    delivery is not configured, so the stage is unchanged by default."""
+    if not dcfg:
+        return None, 0.0
+    by_mood = dcfg.get("by_mood") or {}
+    params = by_mood.get(scene.get("mood")) or dcfg.get("default") or {}
+    style = {}
+    if "exaggeration" in params:
+        style["exaggeration"] = float(params["exaggeration"])
+    if "cfg_weight" in params:
+        style["cfg_weight"] = float(params["cfg_weight"])
+    pause = float(params.get("pause_after", 0.0))
+    shift = float(dcfg.get("mood_shift_pause", 0.0))
+    if shift and next_mood is not None and next_mood != scene.get("mood"):
+        pause = max(pause, shift)
+    pause = min(pause, float(dcfg.get("max_pause", 2.5)))
+    return (style or None), max(0.0, pause)
+
+
+def _append_silence(path: Path, seconds: float) -> None:
+    """Re-encode `path` in place with `seconds` of trailing silence (a designed
+    pause). Applied AFTER the TTS cache, so tuning pauses never re-bills audio;
+    also normalizes the clip to 48k mono so concat inputs stay uniform."""
+    if seconds <= 0:
+        return
+    tmp = path.with_suffix(".pad.mp3")
+    cmd = [
+        ffmpeg_path("ffmpeg"), "-y", "-hide_banner", "-loglevel", "error",
+        "-i", str(path), "-af", f"apad=pad_dur={seconds:.3f}",
+        "-codec:a", "libmp3lame", "-ar", "48000", "-ac", "1", "-b:a", "192k",
+        str(tmp),
+    ]
+    proc = subprocess.run(cmd, capture_output=True, text=True,
+                          encoding="utf-8", errors="replace")
+    if proc.returncode != 0:
+        raise StageError(STAGE, f"pause padding failed on {path.name}: "
+                                f"{proc.stderr.strip()[:300]}")
+    import os
+    os.replace(tmp, path)
+
+
+# --------------------------------------------------------------------------
 # Public, stable aliases for reuse by the dub workflow (pipeline/dub.py) and
 # tests. The underscore versions remain the implementation; import these so
 # the dub path never reaches into private voice internals.
@@ -400,8 +468,9 @@ def run(project: contract.Project, cfg: dict, env: dict, *,
         )
     script = project.script()
     provider = _build_provider(cfg, env)
+    voice_cfg = cfg.get("voice") or {}
     try:
-        _synthesize_project(project, script, provider)
+        _synthesize_project(project, script, provider, voice_cfg)
     finally:
         # Release any GPU/worker the provider holds (e.g. the Chatterbox worker
         # keeps ~3 GB of VRAM resident) so the next stage — generated B-roll on
@@ -412,11 +481,13 @@ def run(project: contract.Project, cfg: dict, env: dict, *,
 
 
 def _synthesize_project(project: contract.Project, script: dict,
-                        provider: TTSProvider) -> None:
+                        provider: TTSProvider,
+                        voice_cfg: dict[str, Any] | None = None) -> None:
     overrides = project.pronunciation_overrides()
     scenes = script["scenes"]
     narrations = [s["narration_ar"].strip() for s in scenes]
     spoken = [_spoken_text(n, overrides) for n in narrations]
+    delivery_cfg = (voice_cfg or {}).get("delivery")
 
     tmp_dir = project.path(_TMP_DIR)
     tmp_dir.mkdir(exist_ok=True)
@@ -431,13 +502,20 @@ def _synthesize_project(project: contract.Project, script: dict,
     for i, scene in enumerate(scenes):
         prev_text = spoken[i - 1] if i > 0 else ""
         next_text = spoken[i + 1] if i < len(scenes) - 1 else ""
+        next_mood = scenes[i + 1].get("mood") if i < len(scenes) - 1 else None
+        style, pause_after = _delivery_for_scene(scene, next_mood, delivery_cfg)
         audio, alignment, from_cache = _synthesize_cached(
-            provider, cache_dir, signature, spoken[i], prev_text, next_text)
+            provider, cache_dir, signature, spoken[i], prev_text, next_text,
+            style)
         if not from_cache:
             billed += len(spoken[i])  # only real API calls are billed
         scene_path = tmp_dir / f"scene_{scene['id']:03d}.mp3"
         scene_path.write_bytes(audio)
+        # Words are timed against the SPOKEN audio (offset); the pause is
+        # trailing silence folded into the scene so timing.json stays
+        # contiguous and the render/captions never drift.
         words = _words_from_alignment(narrations[i], alignment, offset)
+        _append_silence(scene_path, pause_after)
         duration = _probe_duration(scene_path)
         timing_scenes.append({
             "id": scene["id"],

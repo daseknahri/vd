@@ -73,16 +73,22 @@ class ChatterboxTTS:
         }, sort_keys=True)
 
     def synthesize(
-        self, text: str, prev_text: str, next_text: str
+        self, text: str, prev_text: str, next_text: str, *,
+        style: dict[str, Any] | None = None,
     ) -> tuple[bytes, dict[str, Any]]:
         # Chatterbox has no prosody-continuity input, so prev/next are unused
         # for synthesis (they still key the cache upstream — conservative).
+        # `style` carries per-scene delivery (exaggeration/cfg_weight from the
+        # scene's mood); it overrides the provider defaults for this call only.
+        style = style or {}
+        exaggeration = float(style.get("exaggeration", self.exaggeration))
+        cfg_weight = float(style.get("cfg_weight", self.cfg_weight))
         resp = self._request({
             "text": text,
             "language": self.language,
             "voice_ref": self.voice_ref,
-            "exaggeration": self.exaggeration,
-            "cfg_weight": self.cfg_weight,
+            "exaggeration": exaggeration,
+            "cfg_weight": cfg_weight,
             "seed": self.seed,
         })
         if not resp.get("ok"):

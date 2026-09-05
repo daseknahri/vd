@@ -139,6 +139,32 @@ great content. Apply all of these, not just the arc above.
     or caption timing breaks.
 - No tashkeel except where ambiguity actually hurts comprehension.
 
+## Writing for the voice-over (delivery)
+
+The script is read by a TTS voice whose delivery is driven by what you write —
+a flat script gets a flat read. Write so the voice can *mean it*:
+
+- **`mood` now directs the VOICE, not just the footage.** The voice stage maps
+  each scene's `mood` to emotion + pacing — `energetic` = brighter and faster,
+  `archival` = slow, low and heavy, `calm` = warm and unhurried — and to the
+  breath (a designed pause) after the scene. Assign `mood` to the scene's
+  **emotional beat**, deliberately; it is a performance direction now.
+- **Punctuation is pacing** — the only in-scene timing you control:
+  - `…` before a reveal, or ending a line you want to hang, makes the voice
+    slow and let the moment land.
+  - Commas add breath; a comma-light line reads fast and urgent.
+  - Short sentences push energy; long ones calm and slow. **Vary them** — a
+    short sentence after two long ones hits like a punch.
+- **Emphasis without CAPS.** Arabic has no letter case, so stress a key word by
+  putting it **last, right before a pause or period**, and/or end the line with
+  `!` (intensity) or `?` (a lift). One emphasis per sentence — if everything is
+  stressed, nothing is.
+- **Selective tashkeel for prosody.** A mis-vocalized word is a top cause of a
+  flat, robotic read. For a genuinely ambiguous word, a proper name, or the one
+  word you most want stressed, add a *fully-diacritized spoken respelling* to
+  `pronunciation.json` (display text stays bare — same mechanism as foreign
+  names). Never diacritize whole sentences; that over-constrains the voice.
+
 ## Banned phrases (engagement bait & filler)
 
 Never in narration, title, description, or hashtags — these get the
@@ -296,6 +322,10 @@ command — never put Arabic in a shell string):
     with an explicit expression/posture, mood carried by palette/symbolism (not
     "dark/dramatic"/texture words), and an empty landing zone in the upper
     two-thirds.
+12. **Voice-over:** every scene's `mood` matches its emotional beat (it now
+    drives vocal delivery); key lines use `…` / short sentences for pacing and
+    put the stressed word last; any ambiguous or must-stress word has a
+    tashkeel'd respelling in `pronunciation.json`.
 
 Then tell the user the script is ready for **gate 1**: they read it, and
 approve with `python run.py approve projects/<slug> --gate 1`.

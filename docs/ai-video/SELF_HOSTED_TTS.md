@@ -84,6 +84,56 @@ key or `voice_id` is needed; `run.py estimate` is meaningless (cost is fixed).
 `voice_ref` clones a voice from a short clean sample — otherwise the model's
 default multilingual voice is used.
 
+## Expressive delivery — per-scene emotion + designed pauses
+
+A flat, one-setting read is the gap between "text-to-speech" and a narrator who
+*means it*. The voice stage maps each scene's `mood` to Chatterbox delivery
+params and to a breath (silence) after the scene, so the read follows the
+emotional arc. Configured under `voice.delivery` (delete the block to fall back
+to one flat voice, no pauses):
+
+```yaml
+voice:
+  delivery:
+    by_mood:                       # the script's mood enum
+      energetic: { exaggeration: 0.70, cfg_weight: 0.42, pause_after: 0.30 }
+      archival:  { exaggeration: 0.38, cfg_weight: 0.60, pause_after: 0.55 }
+      calm:      { exaggeration: 0.42, cfg_weight: 0.58, pause_after: 0.40 }
+    default:     { exaggeration: 0.50, cfg_weight: 0.50, pause_after: 0.40 }
+    mood_shift_pause: 0.60          # breath at a mood change (short-form: keep tight)
+    max_pause: 1.2
+```
+
+- **Get intensity from LOWER `cfg_weight`, not high `exaggeration`** — high
+  exaggeration speeds Arabic up (wrong for heavy beats); low cfg_weight slows
+  and deepens. That's why `archival` is low-exaggeration + high-cfg and
+  `energetic` the reverse ([Resemble/Chatterbox docs]; validated on this GPU).
+- The pause is folded in as **trailing silence within the scene** — timing.json
+  stays contiguous, the illustration holds through it, captions never drift —
+  and is applied AFTER `voice_cache`, so tuning pauses never re-bills TTS.
+- Per-scene delivery is part of the cache key, so re-emotioning one scene
+  re-synthesizes only that scene.
+- ElevenLabs ignores the per-scene emotion (its expressiveness is v3 audio tags
+  in the text); the pauses still apply.
+
+## The reference voice — the biggest quality lever
+
+The single highest-impact upgrade is cloning ONE expressive Arabic narrator from
+a short clean clip (`voice.chatterbox.voice_ref`): it transfers timbre AND
+emotional colour, and locks a consistent narrator across independently generated
+scenes. Guidance (2026 research):
+
+- **8–15 s, single speaker, quiet/echo-free, no music/SFX**, consistent volume,
+  trimmed so speech fills the clip. Quality matters more than length.
+- **Prefer an Arabic clip** — a non-Arabic reference bleeds its accent into the
+  output (mitigate with `cfg_weight → 0`, but Arabic is better).
+- With a genuinely expressive reference, raise `cfg_weight` back toward 0.5–0.6
+  so the output inherits the reference's own performance, and keep `exaggeration`
+  moderate (~0.6) not maxed (stacking two intensity sources is where Chatterbox
+  turns unstable).
+- Drop the clip in `assets/voice/`, set `voice_ref` to its path. You must have
+  the rights to the voice; do not clone a real person without consent.
+
 ## Performance & footprint (RTX 3060 Ti, 8 GB)
 
 | | Value |
@@ -119,7 +169,9 @@ unvalidated (docs 02/06 flag this). Before switching the default:
 
 ## Not done here (future)
 
-- Arabic voice **cloning** from a chosen reference clip (wire `voice_ref`).
+- **Ship a reference clip** — `voice_ref` is wired (see "The reference voice"),
+  but no default narrator clip is committed; drop one in `assets/voice/`.
 - A `run.py doctor` check that's provider-aware (today it warns about a missing
   `voice_id` even under `provider: chatterbox`, where it isn't needed).
-- Evaluating VoxCPM / other open Arabic TTS behind the same provider seam.
+- ElevenLabs v3 audio-tag emotion (paid) behind the same per-scene seam; and
+  evaluating VoxCPM / other open Arabic TTS.

@@ -68,12 +68,14 @@ def _fake_alignment(text):
 class FakeTTS:
     def __init__(self):
         self.calls = []
+        self.styles = []
 
     def signature(self):
         return "fake-provider-sig"
 
-    def synthesize(self, text, prev_text, next_text):
+    def synthesize(self, text, prev_text, next_text, *, style=None):
         self.calls.append((text, prev_text, next_text))
+        self.styles.append(style)
         return ("MP3:" + text).encode("utf-8"), _fake_alignment(text)
 
 
@@ -478,3 +480,98 @@ def test_subprocess_decodes_utf8_with_replacement(tmp_path, monkeypatch):
     voice._concat_mp3s([tmp_path / "a.mp3"], tmp_path / "out.mp3", tmp_path)
     assert captured["encoding"] == "utf-8"
     assert captured["errors"] == "replace"
+
+
+# -- per-scene expressive delivery + designed pauses ---------------------------
+
+_DELIVERY = {
+    "by_mood": {
+        "energetic": {"exaggeration": 0.70, "cfg_weight": 0.42, "pause_after": 0.45},
+        "calm": {"exaggeration": 0.42, "cfg_weight": 0.58, "pause_after": 0.70},
+        "archival": {"exaggeration": 0.38, "cfg_weight": 0.60, "pause_after": 0.85},
+    },
+    "default": {"exaggeration": 0.5, "cfg_weight": 0.5, "pause_after": 0.55},
+    "mood_shift_pause": 1.2,
+    "max_pause": 2.5,
+}
+
+
+def test_delivery_for_scene_maps_mood_to_style_and_pause():
+    style, pause = voice._delivery_for_scene(
+        {"mood": "energetic"}, "energetic", _DELIVERY)
+    assert style == {"exaggeration": 0.70, "cfg_weight": 0.42}
+    assert pause == 0.45
+
+
+def test_delivery_none_when_unconfigured():
+    # no voice.delivery -> feature inert (old behavior): no style, no pause
+    assert voice._delivery_for_scene({"mood": "calm"}, None, None) == (None, 0.0)
+    assert voice._delivery_for_scene({"mood": "calm"}, None, {}) == (None, 0.0)
+
+
+def test_delivery_mood_shift_bumps_pause():
+    # calm's own pause is 0.70, but the next scene changes mood -> section break
+    _, pause = voice._delivery_for_scene({"mood": "calm"}, "energetic", _DELIVERY)
+    assert pause == 1.2
+    # same mood next -> keep the mood's own pause
+    _, pause_same = voice._delivery_for_scene({"mood": "calm"}, "calm", _DELIVERY)
+    assert pause_same == 0.70
+
+
+def test_delivery_caps_pause_at_max():
+    dcfg = dict(_DELIVERY, mood_shift_pause=99.0, max_pause=2.5)
+    _, pause = voice._delivery_for_scene({"mood": "archival"}, "calm", dcfg)
+    assert pause == 2.5
+
+
+def test_cache_key_includes_style():
+    base = ("sig", "text", "prev", "next")
+    k0 = voice._cache_key(*base, None)
+    k1 = voice._cache_key(*base, {"exaggeration": 0.7, "cfg_weight": 0.3})
+    k2 = voice._cache_key(*base, {"exaggeration": 0.4, "cfg_weight": 0.6})
+    assert k0 != k1 != k2 and k0 != k2   # each delivery caches separately
+
+
+def test_run_delivery_passes_per_scene_style_and_folds_pauses(tmp_path, monkeypatch):
+    fake = FakeTTS()
+    monkeypatch.setattr(voice, "_build_provider", lambda cfg, env: fake)
+    monkeypatch.setattr(voice, "_concat_mp3s", _stub_concat)
+    monkeypatch.setattr(voice, "_probe_duration", lambda p: 2.0)
+    pads = []
+    monkeypatch.setattr(voice, "_append_silence",
+                        lambda path, secs: pads.append((path.name, round(secs, 3))))
+    cfg = {"voice": {"provider": "chatterbox", "chatterbox": {"language": "ar"},
+                     "delivery": _DELIVERY}}
+    project = _make_project(tmp_path)  # scene1 calm, scene2 energetic
+    voice.run(project, cfg, {})
+
+    # scene 1 (calm) delivered with calm params; scene 2 (energetic) with its own
+    assert fake.styles == [
+        {"exaggeration": 0.42, "cfg_weight": 0.58},
+        {"exaggeration": 0.70, "cfg_weight": 0.42},
+    ]
+    # scene1->scene2 is a mood shift -> 1.2s breath; scene2 is last -> its 0.45s
+    assert pads == [("scene_001.mp3", 1.2), ("scene_002.mp3", 0.45)]
+
+
+def test_append_silence_adds_trailing_silence_real_ffmpeg(tmp_path):
+    ffmpeg = contract.ffmpeg_path("ffmpeg")
+    p = tmp_path / "s.mp3"
+    subprocess.run(
+        [ffmpeg, "-y", "-hide_banner", "-loglevel", "error",
+         "-f", "lavfi", "-i", "sine=frequency=440:duration=0.5",
+         "-c:a", "libmp3lame", str(p)],
+        check=True, capture_output=True,
+    )
+    before = voice._probe_duration(p)
+    voice._append_silence(p, 0.6)
+    after = voice._probe_duration(p)
+    assert after >= before + 0.5   # ~0.6s of silence appended (allow mp3 slop)
+
+
+def test_append_silence_zero_is_noop(tmp_path, monkeypatch):
+    called = []
+    monkeypatch.setattr(voice.subprocess, "run",
+                        lambda *a, **k: called.append(a))
+    voice._append_silence(tmp_path / "x.mp3", 0.0)
+    assert called == []   # no ffmpeg invocation for a zero pause
