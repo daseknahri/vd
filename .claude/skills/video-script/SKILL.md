@@ -252,6 +252,26 @@ scroll. The prompt's job is grabbing and holding *human* attention, not looking
 - **One-glance test:** if parsing the frame would take a viewer more than a
   second, cut detail rather than add description.
 
+**Put the character IN the story — the biggest lever for narrative content.**
+The best story channels keep the protagonist (and key recurring cast) in NEARLY
+EVERY scene, *acting out* the beat — never a slideshow of symbolic objects:
+
+- **Write the character doing each beat.** A symbolic shot (a lone candle, a
+  seedling, an empty road) is filler; put the protagonist *with* it — watching
+  the candle, kneeling to touch the seedling, walking the road. Every scene
+  should show *someone feeling something*, not a still life.
+- **Lock a character "bible" per video.** Choose ONE distinctive, byte-identical
+  appearance phrase for the protagonist (and each recurring figure) — e.g.
+  `"an elderly bald man with round glasses and a short white beard, kind gentle
+  face"` — and repeat it VERBATIM in every scene's `broll_prompt` where they
+  appear. That verbatim repetition is what keeps them recognisable across
+  independently generated images (no character model is used). Costume may adapt
+  to context (worn/ragged in a hardship scene) but keep the FACE phrase identical.
+- **One clear expression + action per scene** — the character's feeling is how
+  the beat reads (see the expression bullet above).
+- Reserve a character-free symbolic shot for a deliberate accent (an insert/
+  detail beat), never as the default.
+
 ## Post block
 
 - `title`: ≤ 60 chars, Arabic, states the idea's tension honestly — no
@@ -326,6 +346,9 @@ command — never put Arabic in a shell string):
     drives vocal delivery); key lines use `…` / short sentences for pacing and
     put the stressed word last; any ambiguous or must-stress word has a
     tashkeel'd respelling in `pronunciation.json`.
+13. **Character presence (narrative videos):** the protagonist is in nearly
+    every scene *doing* the beat (not symbolic filler), and the locked
+    character-bible phrase appears verbatim in each of those `broll_prompt`s.
 
 Then tell the user the script is ready for **gate 1**: they read it, and
 approve with `python run.py approve projects/<slug> --gate 1`.
