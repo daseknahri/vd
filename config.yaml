@@ -99,13 +99,22 @@ footage:
 
 captions:
   font: "Tajawal"
-  font_size: 64
-  primary_color: "&H00FFFFFF"        # ASS BGR hex — white
-  highlight_color: "&H0000D7FF"      # karaoke highlight — amber
-  outline_color: "&H00000000"
-  outline: 3
-  margin_v: 280                      # keep clear of platform UI overlays
-  karaoke: true                      # word-level highlight from timing.json
+  font_size: 70                      # bold, large kinetic captions
+  primary_color: "&H00FFFFFF"        # ASS BGR hex — white fill
+  highlight_color: "&H0000D7FF"      # karaoke highlight — amber (karaoke style only)
+  outline_color: "&H00000000"        # black stroke
+  outline: 4                         # thick stroke (the bold-caption look)
+  margin_v: 300                      # lower-middle; clear of platform UI overlays
+  karaoke: true                      # fallback selector when `style` is unset
+  # --- kinetic caption style (reverse-engineered from The Novel Gist) ---
+  style: "reveal"                    # "reveal" = words type on one at a time with a
+                                     #   grey->white pop on the newest (the kinetic
+                                     #   look); "karaoke" = full line, active word
+                                     #   highlighted; "static" = plain page.
+  align: "center"                    # "center" (kinetic) or "right" (classic RTL)
+  max_lines: 3                       # a reveal page builds up to this many lines
+  pop_color: "&H00AAAAAA"            # newest word lands in this grey, then turns white
+  pop_seconds: 0.12                  # how long that pop lasts
 
 audio:
   music_dir: "assets/music"

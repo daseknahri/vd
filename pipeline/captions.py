@@ -39,7 +39,7 @@ FRAME_NAME = "cap_{:04d}.png"
 FONTS_DIR = contract.ROOT / "assets" / "fonts"
 
 H_MARGIN = 80  # px each side; max line width = video width - 2 * H_MARGIN
-MAX_LINES = 2  # caption page height in lines
+DEFAULT_MAX_LINES = 2  # caption page height in lines (config: captions.max_lines)
 
 
 # --------------------------------------------------------------------------
@@ -136,9 +136,9 @@ def _pair_words(narration: str, tscene: dict, warnings: list[dict]) -> list[dict
 
 
 def _paginate(words: list[dict], widths: list[float], max_w: float,
-              space_w: float) -> list[list[list[dict]]]:
+              space_w: float, max_lines: int) -> list[list[list[dict]]]:
     """Greedy RTL fill: pack words into lines (visual flow handled later by
-    x-positioning), at most MAX_LINES lines per page. Returns pages, each a
+    x-positioning), at most max_lines lines per page. Returns pages, each a
     list of lines, each a list of word dicts (narration order)."""
     pages: list[list[list[dict]]] = []
     page: list[list[dict]] = []
@@ -149,7 +149,7 @@ def _paginate(words: list[dict], widths: list[float], max_w: float,
         if not fits:
             page.append(line)
             line, line_w = [], 0.0
-            if len(page) == MAX_LINES:
+            if len(page) == max_lines:
                 pages.append(page)
                 page = []
         line.append({**word, "width": w})
@@ -197,14 +197,21 @@ def _visual_order(line: list[dict]) -> list[int]:
     return order
 
 
-def _position(page: list[list[dict]], video_w: int, space_w: float) -> list[dict]:
-    """Assign x (left edge of each word) flowing right-to-left from the right
-    margin (embedded LTR runs keep their internal left-to-right order), and
-    the line index. Returns the page's words flattened, in narration
-    (chronological) order."""
+def _position(page: list[list[dict]], video_w: int, space_w: float,
+              align: str = "right") -> list[dict]:
+    """Assign x (left edge of each word) flowing right-to-left, and the line
+    index. `align` "right" flows from the right margin (classic RTL); "center"
+    centers each line on its full width so the words appear at their FINAL
+    positions and never shift as a reveal builds. Embedded LTR runs keep their
+    internal left-to-right order. Returns the page's words flattened, in
+    narration (chronological) order."""
     flat: list[dict] = []
     for line_idx, line in enumerate(page):
-        x_right = float(video_w - H_MARGIN)
+        line_w = sum(w["width"] for w in line) + space_w * (len(line) - 1)
+        if align == "center":
+            x_right = (video_w + line_w) / 2.0
+        else:
+            x_right = float(video_w - H_MARGIN)
         for k in _visual_order(line):
             word = line[k]
             word["x"] = x_right - word["width"]
@@ -242,6 +249,32 @@ def _render_frame(size: tuple[int, int], page_words: list[dict],
             word["text"],
             font=font,
             fill=highlight if i == active else primary,
+            direction="rtl",
+            language="ar",
+            stroke_width=outline_w,
+            stroke_fill=outline_rgba,
+        )
+    return img
+
+
+def _render_reveal_frame(size: tuple[int, int], page_words: list[dict],
+                         upto: int, popping: bool, font: ImageFont.FreeTypeFont,
+                         line_y: list[int], primary: tuple, pop: tuple,
+                         outline_rgba: tuple, outline_w: int) -> Image.Image:
+    """Kinetic-reveal frame: only the words spoken so far (0..upto) are drawn,
+    at their fixed final positions, so the caption 'types on' word by word. The
+    newest word (index upto) is drawn in `pop` colour while it is landing, then
+    settles to `primary` — the grey->white pop the reference channel uses. Words
+    drawn one at a time so raqm keeps Arabic joining intact."""
+    img = Image.new("RGBA", size, (0, 0, 0, 0))
+    draw = ImageDraw.Draw(img)
+    for i in range(upto + 1):
+        word = page_words[i]
+        draw.text(
+            (word["x"], line_y[word["line"]]),
+            word["text"],
+            font=font,
+            fill=pop if (popping and i == upto) else primary,
             direction="rtl",
             language="ar",
             stroke_width=outline_w,
@@ -332,7 +365,16 @@ def run(project: contract.Project, cfg: dict, env: dict, *,
         outline_rgba = ass_color(ccfg["outline_color"])
         outline_w = int(ccfg["outline"])
         margin_v = int(ccfg["margin_v"])
+        # style: "karaoke" (full line, active word highlighted — the default),
+        # "static" (no per-word emphasis), or "reveal" (words type on one by one
+        # with a pop on the newest — the kinetic look). `karaoke: false` still
+        # selects "static" for back-compat.
         karaoke = bool(ccfg.get("karaoke", True))
+        style = str(ccfg.get("style", "karaoke" if karaoke else "static")).strip().lower()
+        align = str(ccfg.get("align", "center" if style == "reveal" else "right")).strip().lower()
+        max_lines = max(1, int(ccfg.get("max_lines", DEFAULT_MAX_LINES)))
+        pop_color = ass_color(ccfg["pop_color"]) if ccfg.get("pop_color") else (170, 170, 170, 255)
+        pop_seconds = float(ccfg.get("pop_seconds", 0.12))
     except KeyError as e:
         raise contract.ContractError(f"config: missing video/captions key {e}") from e
 
@@ -350,8 +392,8 @@ def run(project: contract.Project, cfg: dict, env: dict, *,
     line_h = ascent + descent
     line_gap = max(4, font_size // 4)
     pad = outline_w + 8
-    band_h = MAX_LINES * line_h + (MAX_LINES - 1) * line_gap + 2 * pad
-    line_y = [pad + i * (line_h + line_gap) for i in range(MAX_LINES)]
+    band_h = max_lines * line_h + (max_lines - 1) * line_gap + 2 * pad
+    line_y = [pad + i * (line_h + line_gap) for i in range(max_lines)]
     max_line_w = width - 2 * H_MARGIN
 
     cap_dir.mkdir(exist_ok=True)
@@ -387,36 +429,51 @@ def run(project: contract.Project, cfg: dict, env: dict, *,
                     "issue": "word wider than caption line; will overflow margins",
                 })
 
-        for page in _paginate(words, widths, max_line_w, space_w):
-            flat = _position(page, width, space_w)
+        for page in _paginate(words, widths, max_line_w, space_w, max_lines):
+            flat = _position(page, width, space_w, align)
             page_start, page_end = flat[0]["start"], flat[-1]["end"]
             ass_pages.append((
                 page_start, page_end,
                 [" ".join(w["text"] for w in line) for line in page],
             ))
             page_idx = len(ass_pages) - 1
-            actives: list[tuple[int | None, float, float]]
-            if karaoke:
-                actives = [
-                    (i, s, e) for i, (s, e) in enumerate(_frame_times(flat))
-                ]
-            else:
-                actives = [(None, page_start, page_end)]
-            for active, start, end in actives:
+
+            # (start, end, render->Image) specs for this page's frames. `flat`
+            # and page_idx are captured live — specs are consumed in this same
+            # page iteration, below.
+            specs: list[tuple[float, float, Callable[[], Image.Image]]] = []
+            if style == "reveal":
+                # Words type on one at a time; the newest lands in `pop_color`
+                # for pop_seconds, then settles to primary.
+                for i, (w_start, hold_end) in enumerate(_frame_times(flat)):
+                    pop_end = min(w_start + pop_seconds, hold_end)
+                    specs.append((w_start, pop_end, (lambda i=i: _render_reveal_frame(
+                        (width, band_h), flat, i, True, font, line_y,
+                        primary, pop_color, outline_rgba, outline_w))))
+                    specs.append((pop_end, hold_end, (lambda i=i: _render_reveal_frame(
+                        (width, band_h), flat, i, False, font, line_y,
+                        primary, pop_color, outline_rgba, outline_w))))
+            elif style == "karaoke":
+                for i, (s, e) in enumerate(_frame_times(flat)):
+                    specs.append((s, e, (lambda i=i: _render_frame(
+                        (width, band_h), flat, i, font, line_y,
+                        primary, highlight, outline_rgba, outline_w))))
+            else:  # static: one frame, whole page, no per-word emphasis
+                specs.append((page_start, page_end, (lambda: _render_frame(
+                    (width, band_h), flat, None, font, line_y,
+                    primary, highlight, outline_rgba, outline_w))))
+
+            for start, end, render in specs:
                 start_r, end_r = round(start, 3), round(end, 3)
                 if end_r - start_r <= 0:
-                    # Zero-length word spans are contract-valid (align.py's
-                    # interpolation emits them when matched neighbors touch);
-                    # a zero-duration frame would be rejected by the render
-                    # stage's manifest validation, so it is simply skipped.
+                    # Zero-length spans are contract-valid (align.py emits them
+                    # when matched neighbors touch, and the reveal pop/settle
+                    # split can collapse one side); the render stage's manifest
+                    # validation rejects zero-duration frames, so skip them.
                     continue
                 n_png += 1
                 name = FRAME_NAME.format(n_png)
-                img = _render_frame(
-                    (width, band_h), flat, active, font, line_y,
-                    primary, highlight, outline_rgba, outline_w,
-                )
-                img.save(cap_dir / name)
+                render().save(cap_dir / name)
                 frames.append({
                     "png": f"{CAPTIONS_DIR}/{name}",
                     "start": start_r,

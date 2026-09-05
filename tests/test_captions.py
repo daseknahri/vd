@@ -346,6 +346,60 @@ def test_karaoke_off_renders_one_frame_per_page(tmp_path):
         assert f["start"] < f["end"]
 
 
+# --------------------------------------------------------------------------
+# Kinetic reveal style (word-by-word type-on with a grey->white pop)
+# --------------------------------------------------------------------------
+
+def _reveal(tmp_path, **over):
+    proj = new_project(tmp_path)
+    captions.run(proj, make_cfg(style="reveal", align="center", max_lines=3,
+                                pop_color="&H00AAAAAA", pop_seconds=0.06, **over), {})
+    manifest = json.loads(
+        (proj.path(captions.CAPTIONS_DIR) / captions.MANIFEST)
+        .read_text(encoding="utf-8")
+    )
+    return proj, manifest
+
+
+def _area(proj, frame):
+    b = load_frame(proj, frame).getbbox()
+    return (b[2] - b[0]) * (b[3] - b[1]) if b else 0
+
+
+def test_reveal_accumulates_words_and_pops(tmp_path):
+    proj, manifest = _reveal(tmp_path)
+    frames = manifest["frames"]
+    # reveal emits up to 2 frames per word (pop + settle) -> more than the words
+    assert len(frames) > WORD_COUNT
+    # gapless within a page (same invariant as karaoke)
+    by_page: dict[int, list] = {}
+    for f in frames:
+        by_page.setdefault(f["page"], []).append(f)
+    for pf in by_page.values():
+        for a, b in zip(pf, pf[1:]):
+            assert a["end"] == b["start"]
+    # the newest word lands in the grey pop colour on at least one frame
+    assert any(color_bbox(load_frame(proj, f), (170, 170, 170)) for f in frames)
+    # accumulation: within scene 1's page the inked area grows first -> last
+    page0 = [f for f in frames if f["page"] == 0]
+    assert _area(proj, page0[0]) < _area(proj, page0[-1])
+
+
+def test_reveal_center_aligns_the_full_line(tmp_path):
+    proj, manifest = _reveal(tmp_path)
+    page0 = [f for f in manifest["frames"] if f["page"] == 0]
+    b = load_frame(proj, page0[-1]).getbbox()   # full page: all words revealed
+    center_x = (b[0] + b[2]) / 2
+    assert abs(center_x - VIDEO_W / 2) < VIDEO_W * 0.12  # horizontally centered
+
+
+def test_reveal_first_frame_shows_only_one_word(tmp_path):
+    # the very first frame reveals a single word -> much less ink than the full line
+    proj, manifest = _reveal(tmp_path)
+    page0 = [f for f in manifest["frames"] if f["page"] == 0]
+    assert _area(proj, page0[0]) * 2 < _area(proj, page0[-1])
+
+
 def test_missing_inputs_raise_contract_error(tmp_path):
     proj = Project(dir=tmp_path)
     proj.write_json(contract.SCRIPT, make_script())
