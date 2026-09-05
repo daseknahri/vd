@@ -109,6 +109,10 @@ def patched(monkeypatch):
     monkeypatch.setattr(voice, "_build_provider", lambda cfg, env: fake)
     monkeypatch.setattr(voice, "_probe_duration", lambda p: 2.0)
     monkeypatch.setattr(voice, "_concat_mp3s", _stub_concat)
+    # Diacritization off by default in tests: no model load, plain spoken text
+    # (the merge logic is unit-tested separately in _spoken_text tests).
+    monkeypatch.setattr(voice.diacritize, "diacritize_batch",
+                        lambda texts: [None] * len(texts))
     return fake
 
 
@@ -175,6 +179,73 @@ def test_scene_characters_bad_override_raises(tmp_path):
     project = _make_project(tmp_path)
     with pytest.raises(ContractError, match="one word"):
         voice.scene_characters(project.script(), {"خوارزمية": "خوار زمية"})
+
+
+# -- diacritization merge in _spoken_text -----------------------------------
+
+def test_spoken_text_applies_diacritization():
+    assert voice._spoken_text("العلم نور", {}, "الْعِلْمُ نُورٌ") == "الْعِلْمُ نُورٌ"
+
+
+def test_spoken_text_override_beats_diacritization():
+    # proper nouns: pronunciation.json wins over CATT's (mangled) diacritization
+    out = voice._spoken_text(
+        "فيكتور فرانكل", {"فيكتور": "فِيكْتور", "فرانكل": "فرانكِل"},
+        "فَيَكْتُوِرُ فَرَانْكُلَ")
+    assert out == "فِيكْتور فرانكِل"
+
+
+def test_spoken_text_preserves_punctuation_with_diacritization():
+    # CATT drops the ؟; it must be re-attached so pacing survives
+    assert voice._spoken_text("نعم؟", {}, "نَعَمْ") == "نَعَمْ؟"
+
+
+def test_spoken_text_wordcount_mismatch_ignores_diacritization():
+    # a diacritized string with the wrong token count is discarded (timing safe)
+    assert voice._spoken_text("العلم نور", {}, "الْعِلْمُ") == "العلم نور"
+
+
+def test_spoken_text_plain_when_no_diacritization():
+    assert voice._spoken_text("مرحبا بكم", {}) == "مرحبا بكم"
+
+
+def test_run_sends_diacritized_text_to_provider(tmp_path, patched, monkeypatch):
+    project = _make_project(tmp_path)
+    dia = {  # CATT-style output: harakat added, punctuation dropped
+        "مرحبا بكم في المصنع": "مَرْحَبًا بِكُمْ فِي الْمَصْنَعِ",
+        "هذه خوارزمية، مذهلة حقا": "هَذِهِ خُوَارِزْمِيَّةٌ مُذْهِلَةٌ حَقًّا",
+    }
+    monkeypatch.setattr(voice.diacritize, "diacritize_batch",
+                        lambda texts: [dia[t] for t in texts])
+    voice.run(project, CFG, ENV)
+    spoken_sent = [c[0] for c in patched.calls]
+    assert "مَرْحَبًا بِكُمْ فِي الْمَصْنَعِ" in spoken_sent
+    # the dropped comma is re-attached after the diacritized word
+    assert "هَذِهِ خُوَارِزْمِيَّةٌ، مُذْهِلَةٌ حَقًّا" in spoken_sent
+
+
+def test_ramble_guard_falls_back_to_plain(tmp_path, monkeypatch):
+    project = _make_project(tmp_path)
+    fake = FakeTTS()
+    monkeypatch.setattr(voice, "_build_provider", lambda cfg, env: fake)
+    monkeypatch.setattr(voice, "_concat_mp3s", _stub_concat)
+    # "diacritize" = append a fatha (distinct from plain, same word count)
+    monkeypatch.setattr(voice.diacritize, "diacritize_batch",
+                        lambda texts: [t + "َ" for t in texts])
+    # first raw-take probe is huge (scene 1 rambles), everything after is fine
+    probes = iter([99.0])
+    monkeypatch.setattr(voice, "_probe_duration",
+                        lambda p: next(probes, 2.0))
+
+    voice.run(project, CFG, ENV)
+
+    # scene 1 rambled on the diacritized take -> redone with its PLAIN text;
+    # scene 2 did not ramble, so only scene 1 fell back.
+    report = project.read_json(voice.VOICE_REPORT)
+    assert report["diacritized_fallback_scenes"] == [1]
+    sent = [c[0] for c in fake.calls]
+    assert "مرحبا بكم في المصنع" in sent   # plain fallback synthesized for scene 1
+    assert "مرحبا بكم في المصنعَ" in sent   # the rambling diacritized take was tried first
 
 
 def test_run_writes_voice_report_with_char_counts(tmp_path, patched):

@@ -424,12 +424,25 @@ def _audio_filter(voice_idx: int, music_idx: int | None, total: float,
     gain = _need(acfg, "music_gain_db", "audio")
     thr = _need(acfg, "duck_threshold", "audio")
     ratio = _need(acfg, "duck_ratio", "audio")
+    # Gentle sidechain (research 2026): attack catches word onsets, a slow release
+    # recovers like breathing (no pumping), soft knee smooths it. A hard ratio +
+    # low threshold behaves as a noise gate and makes the bed vanish.
+    attack = acfg.get("duck_attack", 15)
+    release = acfg.get("duck_release", 400)
+    knee = acfg.get("duck_knee", 6)
+    duck = (f"sidechaincompress=threshold={thr}:ratio={ratio}"
+            f":attack={attack}:release={release}:makeup=1:knee={knee}")
+    # Graceful music fade-out at the end — applied to the BED only, so the final
+    # narration is untouched (a hard cut read as "sound stops like bad editing").
+    outro = float(acfg.get("outro_fade", 2.0))
+    fstart = max(0.0, total - outro)
+    bed_outro = f",afade=t=out:st={fstart:.3f}:d={outro:.3f}" if outro > 0 else ""
     return (
         f"[{voice_idx}:a]asplit=2[vo_mix][vo_sc];"
         f"[{music_idx}:a]aloop=loop=-1:size=2147483647,"
         f"atrim=duration={total:.3f},volume={gain}dB[bed];"
-        f"[bed][vo_sc]sidechaincompress=threshold={thr}:ratio={ratio}[duck];"
-        f"[duck]{_entrance_chain(acfg)}[bedf];"
+        f"[bed][vo_sc]{duck}[duck];"
+        f"[duck]{_entrance_chain(acfg)}{bed_outro}[bedf];"
         f"[vo_mix][bedf]amix=inputs=2:duration=first,{master}"
     )
 

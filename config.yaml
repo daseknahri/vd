@@ -19,6 +19,18 @@ voice:
   stability: 0.5
   similarity_boost: 0.75
   speed: 1.0
+  diacritize: true            # auto-add Arabic tashkeel (CATT, Apache-2.0, CPU)
+                              # before TTS so correctly-spelled words are
+                              # PRONOUNCED correctly; display/captions keep the
+                              # plain spelling, word count is preserved (timing
+                              # safe). Silent fallback if CATT isn't installed.
+                              # NOTE: ~doubles ElevenLabs char billing; free for
+                              # chatterbox. Per-word fixes still go in
+                              # pronunciation.json (they override CATT).
+  ramble_guard: true          # if a diacritized scene makes the TTS over-generate
+                              # (Chatterbox can loop on heavy tashkeel — 30s+ of
+                              # audio for an 8s line), redo THAT scene with plain
+                              # text so nothing rambles. Only active with diacritize.
   # --- Voice-content audit (hardening). After a real voice run the pipeline
   #     free-transcribes the voiceover (faster-whisper; transcribe.* below) and
   #     compares it to the script, catching TTS stutters — a word spoken twice,
@@ -131,17 +143,24 @@ captions:
 
 audio:
   music_dir: "assets/music"
-  music_gain_db: -14                 # bed level before ducking
-  duck_threshold: 0.05               # sidechain compression settings
-  duck_ratio: 8
-  loudness_lufs: -16                 # EBU R128 target (per-platform spec)
-  # Entrance music: the bed rises under the opening hook, then settles to the
-  # ducked level (the reference channel's "entrance"). Needs a track in
-  # music_dir — synthesize a simple one with: python tools/make_music_bed.py
+  # Mix tuned for music-under-narration (research 2026): the bed sits ~16-24 dB
+  # below the voice during speech — present texture, not a co-lead — via a GENTLE
+  # sidechain (a hard ratio/low threshold acts as a noise gate and makes the bed
+  # vanish, which read as "sound stops").
+  music_gain_db: -11                 # bed level before ducking (compressor rides it)
+  duck_threshold: 0.09               # ~-21 dBFS: reacts to speech, not room tone
+  duck_ratio: 3.5                    # gentle ride-under (NOT a gate; was 8)
+  duck_attack: 15                    # ms — catch word onsets
+  duck_release: 400                  # ms — recover like breathing, no pumping
+  duck_knee: 6                       # soft knee = smooth, not a mechanical snap
+  loudness_lufs: -14                 # 2026 social target (was -16 = quiet in-feed)
+  # Entrance swell + graceful outro (the reference channel's "entrance"). Needs a
+  # track in music_dir — synthesize one with: python tools/make_music_bed.py
   entrance_seconds: 2.0              # how long the opening swell holds (0 = off)
-  entrance_gain_db: 8                # how much louder the bed is during it
-  entrance_ramp: 1.2                 # seconds to ramp back down to the bed level
-  intro_fade: 0.8                    # music fades in from silence over this
+  entrance_gain_db: 4                # softer, so the settle isn't heard as a drop
+  entrance_ramp: 2.5                 # slow settle back to bed level
+  intro_fade: 1.2                    # music rises from silence over this
+  outro_fade: 2.0                    # music fades out at the end (no hard stop)
 
 transcribe:
   model: "small"                     # faster-whisper model size

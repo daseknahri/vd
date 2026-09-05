@@ -27,7 +27,7 @@ from typing import Any, Protocol
 
 import requests
 
-from pipeline import contract
+from pipeline import contract, diacritize
 from pipeline.contract import ContractError, ffmpeg_path, require_env
 from pipeline.errors import StageError
 
@@ -217,17 +217,43 @@ def _spoken_word(token: str, overrides: dict[str, str]) -> str:
     return token
 
 
-def _spoken_text(display: str, overrides: dict[str, str]) -> str:
+def _spoken_text(display: str, overrides: dict[str, str],
+                 diacritized: str | None = None) -> str:
+    """The exact text sent to the TTS. Layers, in order of precedence:
+    1. pronunciation.json overrides (win — proper nouns/loanwords the diacritizer
+       mangles, e.g. فيكتور/فرانكل), matched on the plain display word;
+    2. CATT auto-diacritization (`diacritized`, same word count as display) for
+       every other word — its harakat make the TTS pronounce correctly;
+    3. the plain word, when neither applies.
+    Original punctuation is re-attached (CATT drops it) so pacing cues survive.
+    Display/caption text is never touched, so the caption/timing 1:1 map holds."""
     display_words = display.split()
+    dia_words: list[str] | None = None
+    if isinstance(diacritized, str):
+        dw = diacritized.split()
+        if len(dw) == len(display_words):  # must align 1:1 or we don't use it
+            dia_words = dw
     spoken_words = []
-    for token in display_words:
-        spoken = _spoken_word(token, overrides)
+    for i, token in enumerate(display_words):
+        if token in overrides:
+            spoken = overrides[token]
+        else:
+            lead, core, trail = _strip_edge_punct(token)
+            if core and core in overrides:
+                spoken = lead + overrides[core] + trail
+            elif dia_words is not None:
+                # CATT diacritized this token and stripped its punctuation; take
+                # the diacritized core and re-attach the original punctuation.
+                _dl, dcore, _dt = _strip_edge_punct(dia_words[i])
+                spoken = lead + (dcore or dia_words[i]) + trail
+            else:
+                spoken = token
         # Word-for-word substitution is the contract: caption timing maps
         # spoken word N back onto display word N.
         if len(spoken.split()) != 1:
             raise ContractError(
-                f"pronunciation override for {token!r} produced {spoken!r} — "
-                f"respellings must be exactly one word"
+                f"pronunciation/diacritization for {token!r} produced "
+                f"{spoken!r} — must be exactly one word"
             )
         spoken_words.append(spoken)
     return " ".join(spoken_words)
@@ -440,6 +466,15 @@ def _append_silence(path: Path, seconds: float) -> None:
     os.replace(tmp, path)
 
 
+def _rambled(raw_seconds: float, word_count: int) -> bool:
+    """True when a take's audio is far longer than the script could fill even at
+    a slow ~1.4 words/sec — i.e. the TTS looped / over-generated. Heavy Arabic
+    diacritization is out-of-distribution for Chatterbox and triggers this on some
+    scenes (28-40s of audio for an 8s script); the scene is then redone with its
+    plain text, which is stable."""
+    return word_count > 0 and raw_seconds > word_count / 1.4 + 2.5
+
+
 # --------------------------------------------------------------------------
 # Public, stable aliases for reuse by the dub workflow (pipeline/dub.py) and
 # tests. The underscore versions remain the implementation; import these so
@@ -493,8 +528,18 @@ def _synthesize_project(project: contract.Project, script: dict,
     overrides = project.pronunciation_overrides()
     scenes = script["scenes"]
     narrations = [s["narration_ar"].strip() for s in scenes]
-    spoken = [_spoken_text(n, overrides) for n in narrations]
+    # Auto-diacritize (CATT) so the TTS pronounces correctly; best-effort and
+    # per-scene, falling back to plain text where unavailable. Overrides + display
+    # spelling are handled inside _spoken_text.
+    diacritize_on = (voice_cfg or {}).get("diacritize", True)
+    diacritized = (diacritize.diacritize_batch(narrations)
+                   if diacritize_on else [None] * len(narrations))
+    spoken = [_spoken_text(n, overrides, diacritized[i])
+              for i, n in enumerate(narrations)]
+    # Plain (undiacritized) spoken text per scene — the ramble guard's fallback.
+    spoken_plain = [_spoken_text(n, overrides) for n in narrations]
     delivery_cfg = (voice_cfg or {}).get("delivery")
+    ramble_guard = diacritize_on and (voice_cfg or {}).get("ramble_guard", True)
 
     tmp_dir = project.path(_TMP_DIR)
     tmp_dir.mkdir(exist_ok=True)
@@ -504,6 +549,8 @@ def _synthesize_project(project: contract.Project, script: dict,
 
     scene_files: list[Path] = []
     timing_scenes: list[dict[str, Any]] = []
+    used_texts: list[str] = []
+    fell_back: list[int] = []
     billed = 0
     offset = 0.0
     for i, scene in enumerate(scenes):
@@ -511,13 +558,26 @@ def _synthesize_project(project: contract.Project, script: dict,
         next_text = spoken[i + 1] if i < len(scenes) - 1 else ""
         next_mood = scenes[i + 1].get("mood") if i < len(scenes) - 1 else None
         style, pause_after = _delivery_for_scene(scene, next_mood, delivery_cfg)
-        audio, alignment, from_cache = _synthesize_cached(
-            provider, cache_dir, signature, spoken[i], prev_text, next_text,
-            style)
-        if not from_cache:
-            billed += len(spoken[i])  # only real API calls are billed
         scene_path = tmp_dir / f"scene_{scene['id']:03d}.mp3"
+
+        text_i = spoken[i]
+        audio, alignment, from_cache = _synthesize_cached(
+            provider, cache_dir, signature, text_i, prev_text, next_text, style)
         scene_path.write_bytes(audio)
+        # Ramble guard: if a DIACRITIZED take over-generates, redo the scene with
+        # its plain text (stable). Measured on the raw take, before the pause.
+        if (ramble_guard and text_i != spoken_plain[i]
+                and _rambled(_probe_duration(scene_path),
+                             len(narrations[i].split()))):
+            text_i = spoken_plain[i]
+            audio, alignment, from_cache = _synthesize_cached(
+                provider, cache_dir, signature, text_i, prev_text, next_text,
+                style)
+            scene_path.write_bytes(audio)
+            fell_back.append(scene["id"])
+        used_texts.append(text_i)
+        if not from_cache:
+            billed += len(text_i)  # only real API calls are billed
         # Words are timed against the SPOKEN audio (offset); the pause is
         # trailing silence folded into the scene so timing.json stays
         # contiguous and the render/captions never drift.
@@ -541,12 +601,14 @@ def _synthesize_project(project: contract.Project, script: dict,
     # script; billed excludes scenes served from the cache this run, so spend
     # is auditable after the fact and matches `run.py estimate` on a cold run.
     project.write_json(VOICE_REPORT, {
-        "total_characters": sum(len(s) for s in spoken),
+        "total_characters": sum(len(s) for s in used_texts),
         "billed_characters": billed,
+        "diacritized_fallback_scenes": fell_back,
         "scenes": [{"id": sc["id"], "characters": len(sp)}
-                   for sc, sp in zip(scenes, spoken)],
+                   for sc, sp in zip(scenes, used_texts)],
         "note": "billed characters = `text` only; previous_text/next_text "
                 "conditioning is not billed by ElevenLabs; cache hits are "
-                "excluded from billed_characters",
+                "excluded from billed_characters; diacritized_fallback_scenes "
+                "over-generated on tashkeel and were redone with plain text",
     })
     shutil.rmtree(tmp_dir, ignore_errors=True)

@@ -337,6 +337,14 @@ def test_entrance_chain_can_be_disabled():
     assert "afade=t=in" in hot and "eval=frame" in hot
 
 
+def test_audio_filter_gentle_duck_and_outro_fade():
+    fc = render_ffmpeg._audio_filter(2, 3, TOTAL, _cfg("unused")["audio"])
+    # sidechain carries attack/release/soft-knee (not a bare gate)
+    assert ":attack=15:release=400:makeup=1:knee=6" in fc
+    # music fades out at the end so it never hard-cuts (TOTAL=4, outro 2.0)
+    assert "afade=t=out:st=2.000:d=2.000[bedf]" in fc
+
+
 def test_missing_manifest_is_contract_error(tmp_path):
     proj = Project(dir=tmp_path / "p")
     proj.dir.mkdir()
