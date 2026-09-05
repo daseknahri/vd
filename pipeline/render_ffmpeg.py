@@ -43,6 +43,7 @@ WORK_DIR = "render_work"
 CAPTIONS_MOV = "captions.mov"
 CAPTION_LIST = "captions_concat.txt"
 GAP_PNG = "_gap.png"
+ICONS_DIR = contract.ROOT / "assets" / "icons"  # pop-in emphasis icon PNGs
 
 PLACEHOLDER_COLOR = "0x202030"
 MUSIC_EXTS = {".mp3", ".m4a", ".wav"}
@@ -62,10 +63,25 @@ def run(project: Project, cfg: dict, env: dict, *, force: bool = False) -> None:
     if not isinstance(acfg, dict):
         raise ContractError("config: 'audio' section is required for render")
 
-    project.script()  # validate the spine; timing.json drives the cut
+    script = project.script()  # validate the spine; timing.json drives the cut
+    icon_by_id = {int(s["id"]): s["icon"]
+                  for s in script["scenes"] if s.get("icon")}
     timing = project.timing()
     total = float(timing["total_seconds"])
     scenes = sorted(timing["scenes"], key=lambda s: float(s["start"]))
+
+    # Pop-in emphasis icons: (png, appear_time, end_time) per scene that sets an
+    # `icon`; the icon fades in ~30% into the scene and holds to the scene end.
+    icon_specs: list[tuple[Path, float, float]] = []
+    for s in scenes:
+        name = icon_by_id.get(int(s["id"]))
+        if not name:
+            continue
+        png = ICONS_DIR / f"{name}.png"
+        if not png.exists():
+            continue
+        st, en = float(s["start"]), float(s["end"])
+        icon_specs.append((png, st + min(0.6, 0.30 * (en - st)), en))
 
     voice_path = project.path(contract.VOICEOVER)
     if not voice_path.exists():
@@ -128,6 +144,14 @@ def run(project: Project, cfg: dict, env: dict, *, force: bool = False) -> None:
         cap_idx = next_idx
         next_idx += 1
         cmd += ["-i", str(captions_mov)]
+    icon_idx: list[int] = []
+    for png, _appear, _end in icon_specs:
+        icon_idx.append(next_idx)
+        next_idx += 1
+        # Bound the looped still to the timeline (finite + light): an unbounded
+        # `-loop 1` image input makes ffmpeg churn and the encode never ends.
+        cmd += ["-loop", "1", "-framerate", str(fps), "-t", f"{total:.3f}",
+                "-i", str(png)]
     voice_idx = next_idx
     next_idx += 1
     cmd += ["-i", str(voice_path)]
@@ -149,6 +173,26 @@ def run(project: Project, cfg: dict, env: dict, *, force: bool = False) -> None:
         vlabel = "[vout]"
     else:
         vlabel = "[vcat]"
+
+    # Pop-in emphasis icons: each fades in at its scene's beat, held to the
+    # scene end, in the upper area (clear of the lower caption band).
+    if icon_specs:
+        iw = round(width * 0.15)
+        ix = round(width * 0.58)
+        iy = round(height * 0.10)
+        cur = vlabel
+        for k, (_png, appear, end) in enumerate(icon_specs):
+            parts.append(
+                f"[{icon_idx[k]}:v]scale={iw}:-1,fps={fps},format=rgba,"
+                f"fade=t=in:st={appear:.3f}:d=0.30:alpha=1[ic{k}]"
+            )
+            parts.append(
+                f"{cur}[ic{k}]overlay=x={ix}:y={iy}:"
+                f"enable='between(t,{appear:.3f},{end:.3f})'[vic{k}]"
+            )
+            cur = f"[vic{k}]"
+        vlabel = cur
+
     parts.append(_audio_filter(voice_idx, music_idx, total, acfg))
 
     cmd += [

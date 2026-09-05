@@ -167,6 +167,27 @@ def test_final_ffmpeg_command_shape(rendered):
         assert flag in final_cmd
 
 
+def test_pop_in_icon_overlaid_and_renders(tmp_path):
+    """A scene with an `icon` adds a timed, faded-in overlay of the real icon
+    asset to the render, and still produces a valid final.mp4."""
+    import copy
+    proj = _make_project(tmp_path)
+    script = copy.deepcopy(SCRIPT)
+    script["scenes"][0]["icon"] = "question"   # assets/icons/question.png
+    proj.write_json(contract.SCRIPT, script)
+    render_ffmpeg.run(proj, _cfg(str(tmp_path / "no_music")), {}, force=True)
+
+    report = proj.read_json(render_ffmpeg.RENDER_REPORT)
+    final_cmd = next(c for c in report["commands"]
+                     if str(proj.path(contract.FINAL)) in c)
+    joined = " ".join(final_cmd)
+    assert "question.png" in joined                  # icon input added
+    fc = final_cmd[final_cmd.index("-filter_complex") + 1]
+    assert "fade=t=in:st=" in fc                      # pop/fade-in
+    assert "enable='between(t," in fc                 # timed to the scene beat
+    assert proj.path(contract.FINAL).exists()         # rendered for real
+
+
 def test_render_with_music_bed_and_empty_manifest(tmp_path):
     """Music graph (aloop/duck/amix) runs for real; no overlay when the
     manifest has no entries."""

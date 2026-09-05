@@ -93,6 +93,9 @@ GATE1_APPROVED = ".gate1_script_approved"   # human gate markers
 GATE2_APPROVED = ".gate2_review_approved"
 
 VALID_MOODS = {"archival", "energetic", "calm"}
+# Optional per-scene pop-in emphasis icon (render overlay). Asset files live in
+# assets/icons/<name>.png.
+ICON_NAMES = {"question", "heart", "sparkle"}
 
 
 class ContractError(ValueError):
@@ -223,6 +226,14 @@ def validate_script(data: dict[str, Any]) -> dict[str, Any]:
             raise ContractError(
                 f"script.json: {where}.broll_prompt, if present, must be a "
                 f"non-empty string"
+            )
+        # Optional: a small pop-in emphasis icon overlaid at this scene's beat
+        # (render stage). One of ICON_NAMES; asset at assets/icons/<name>.png.
+        ic = scene.get("icon")
+        if ic is not None and ic not in ICON_NAMES:
+            raise ContractError(
+                f"script.json: {where}.icon, if present, must be one of "
+                f"{sorted(ICON_NAMES)}"
             )
 
     post = data.get("post")
