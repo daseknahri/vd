@@ -159,11 +159,20 @@ a flat script gets a flat read. Write so the voice can *mean it*:
   putting it **last, right before a pause or period**, and/or end the line with
   `!` (intensity) or `?` (a lift). One emphasis per sentence — if everything is
   stressed, nothing is.
-- **Selective tashkeel for prosody.** A mis-vocalized word is a top cause of a
-  flat, robotic read. For a genuinely ambiguous word, a proper name, or the one
-  word you most want stressed, add a *fully-diacritized spoken respelling* to
-  `pronunciation.json` (display text stays bare — same mechanism as foreign
-  names). Never diacritize whole sentences; that over-constrains the voice.
+- **Write so the voice breathes.** Short, comma-separated clauses give the TTS
+  natural pause points — the reference VO breathes every few words and never
+  leaves long dead air. A long comma-light sentence reads as a run-on; break it.
+- **Selective tashkeel — and AUDIT the render for it.** A mis-vocalized word is a
+  top cause of a flat OR wrong read (bare Arabic is ambiguous). For a genuinely
+  ambiguous word, a proper name, or the one word you most want stressed, add a
+  *fully-diacritized spoken respelling* to `pronunciation.json` (the caption
+  keeps the bare word — same mechanism as foreign names); never diacritize whole
+  sentences. **After a render, audit:** transcribe the finished `voiceover.mp3`
+  (faster-whisper, ar) and diff it against the narration — where the voice says a
+  *different* word, add a respelling. Common Arabic-TTS traps caught this way: a
+  hamza collapsing (سأل "asked" heard as سعل "coughed" → سَأَلَ), an un-doubled
+  shadda (اللذة "pleasure" → اللَّذَّة), a short vowel flipping the meaning
+  (الدافع "motive" vs الدفع "payment" → الدَّافِع).
 
 ## Banned phrases (engagement bait & filler)
 

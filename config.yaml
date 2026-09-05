@@ -48,12 +48,15 @@ voice:
   # apply). Remove this whole block to fall back to one flat voice, no pauses.
   delivery:
     by_mood:                     # mood enum: energetic | archival | calm
-      energetic: { exaggeration: 0.70, cfg_weight: 0.42, pause_after: 0.30 }
-      archival:  { exaggeration: 0.38, cfg_weight: 0.60, pause_after: 0.55 }
-      calm:      { exaggeration: 0.42, cfg_weight: 0.58, pause_after: 0.40 }
-    default:     { exaggeration: 0.50, cfg_weight: 0.50, pause_after: 0.40 }
-    mood_shift_pause: 0.60       # a breath at a real beat change (short-form: keep tight)
-    max_pause: 1.2              # never let a single pause read as dead air
+      energetic: { exaggeration: 0.70, cfg_weight: 0.42, pause_after: 0.25 }
+      archival:  { exaggeration: 0.38, cfg_weight: 0.60, pause_after: 0.45 }
+      calm:      { exaggeration: 0.42, cfg_weight: 0.58, pause_after: 0.35 }
+    default:     { exaggeration: 0.50, cfg_weight: 0.50, pause_after: 0.30 }
+    # Audit vs the reference VO (2026-09-05): theirs breathes throughout (many
+    # ~0.3s pauses, max gap ~0.7s); ours was blocky (few, but up to ~1.5s). Keep
+    # inter-scene breaths short so the pacing stays tight, not draggy.
+    mood_shift_pause: 0.45       # a breath at a real beat change
+    max_pause: 0.85            # cap: their longest gap was ~0.72s
 
 footage:
   providers: ["pexels", "pixabay"]   # tried in order
