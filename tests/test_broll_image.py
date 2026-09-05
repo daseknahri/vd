@@ -201,6 +201,40 @@ def test_generate_connection_error_raises(monkeypatch, tmp_path):
         broll_image.build({}).generate("x", tmp_path / "s.mp4", seed=1, duration=5.0)
 
 
+# -- flat-white border trim ----------------------------------------------------
+def _png(img):
+    from io import BytesIO
+    b = BytesIO(); img.save(b, format="PNG"); return b.getvalue()
+
+
+def test_trim_flat_border_removes_pure_white_edge_band():
+    from io import BytesIO
+    from PIL import Image
+    img = Image.new("RGB", (200, 400), (120, 120, 120))  # flat gray content
+    for x in range(180, 200):                              # 10% pure-white right band
+        for y in range(400):
+            img.putpixel((x, y), (255, 255, 255))
+    out = broll_image._trim_flat_border(_png(img))
+    w, h = Image.open(BytesIO(out)).size
+    assert w == 180 and h == 400          # exactly the white band removed
+    assert out != _png(img)
+
+
+def test_trim_flat_border_leaves_full_bleed_untouched():
+    from PIL import Image
+    img = Image.new("RGB", (200, 400), (120, 120, 120))   # no pure-white edge
+    src = _png(img)
+    assert broll_image._trim_flat_border(src) == src      # unchanged bytes
+
+
+def test_trim_flat_border_ignores_pale_but_not_pure_edges():
+    # a pale sky/snow edge (near white but < threshold, or textured) must survive
+    from PIL import Image
+    img = Image.new("RGB", (200, 400), (245, 245, 245))   # pale, but < white=252
+    src = _png(img)
+    assert broll_image._trim_flat_border(src) == src
+
+
 # -- footage.run integration (ai_broll, engine="image") -------------------------
 def _script(scenes):
     return {"meta": {"source_url": "https://example.com/v", "audience": "general Arab",

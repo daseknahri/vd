@@ -22,9 +22,11 @@ import tempfile
 import time
 import urllib.parse
 import uuid
+from io import BytesIO
 from pathlib import Path
 
 import requests
+from PIL import Image
 
 from pipeline import contract
 from pipeline.contract import ffmpeg_path
@@ -152,12 +154,60 @@ class ComfyImageBroll:
 
     # -- public: still -> scene-length crop-pan clip ----------------------
     def generate(self, prompt: str, out_mp4: Path, seed: int, duration: float) -> None:
-        still = self._generate_still(prompt, seed)
+        still = _trim_flat_border(self._generate_still(prompt, seed))
         dur = max(1.0, min(float(duration), self.max_seconds))
         _ken_burns(still, out_mp4, dur, self.fps, self.out_width, self.out_height, seed)
 
 
 # -- module helpers -----------------------------------------------------------
+def _trim_flat_border(png: bytes, *, white: int = 252, frac: float = 0.97,
+                      max_trim: float = 0.14) -> bytes:
+    """Crop the flat, near-pure-white die-cut band the StickersRedmond LoRA
+    occasionally leaves along ONE edge (a "sticker" margin) — otherwise the Ken
+    Burns pan drifts it into frame as a white bar (measured up to ~9% on a bad
+    seed). A row/col counts as margin only if ≥`frac` of its pixels are
+    near-pure white (≥`white`); real content, pale sky gradients and snowy
+    scenes carry linework/shadow, so they never reach that purity and are left
+    untouched. Trims at most `max_trim` per side (a full-bleed still returns
+    unchanged). English-only stills; no text involved. Best-effort: anything
+    that will not decode as an image is returned unchanged (trim is cosmetic,
+    never fatal)."""
+    try:
+        img = Image.open(BytesIO(png)).convert("RGB")
+    except Exception:
+        return png
+    w, h = img.size
+    px = img.convert("L").load()
+
+    def is_white_col(x: int) -> bool:
+        whites = sum(1 for y in range(0, h, 3) if px[x, y] >= white)
+        return whites / len(range(0, h, 3)) >= frac
+
+    def is_white_row(y: int) -> bool:
+        whites = sum(1 for x in range(0, w, 3) if px[x, y] >= white)
+        return whites / len(range(0, w, 3)) >= frac
+
+    def run(n: int, is_white) -> int:
+        got = 0
+        for i in range(n):
+            if is_white(i):
+                got = i + 1
+            else:
+                break
+        return got
+
+    left = run(int(w * max_trim), is_white_col)
+    right = run(int(w * max_trim), lambda i: is_white_col(w - 1 - i))
+    top = run(int(h * max_trim), is_white_row)
+    bottom = run(int(h * max_trim), lambda i: is_white_row(h - 1 - i))
+    if not (left or right or top or bottom):
+        return png
+    out = BytesIO()
+    img.crop((left, top, w - right, h - bottom)).save(out, format="PNG")
+    return out.getvalue()
+
+
+
 def _ken_burns(png: bytes, out_mp4: Path, dur: float, fps: int,
                w: int, h: int, seed: int) -> None:
     """Animate a still into a `dur`-second w:h clip via a cheap crop-pan
