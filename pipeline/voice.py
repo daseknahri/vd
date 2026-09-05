@@ -449,6 +449,13 @@ build_provider = _build_provider
 synthesize_cached = _synthesize_cached
 probe_duration = _probe_duration
 words_from_alignment = _words_from_alignment
+# Reused by the voice-content audit (pipeline/verify_voice.py) to reconstruct a
+# scene's exact cache key + delivery so it can re-roll one stuttering take
+# without disturbing the others.
+spoken_text = _spoken_text
+cache_key = _cache_key
+delivery_for_scene = _delivery_for_scene
+CACHE_DIR = _CACHE_DIR
 
 
 # --------------------------------------------------------------------------

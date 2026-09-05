@@ -320,6 +320,23 @@ def test_audio_filter_with_and_without_music():
     assert voice_only.startswith("[2:a]loudnorm=I=-16")
 
 
+def test_audio_filter_has_entrance_swell_by_default():
+    acfg = _cfg("unused")["audio"]  # no entrance keys -> defaults apply
+    fc = render_ffmpeg._audio_filter(2, 3, TOTAL, acfg)
+    # the ducked bed is faded in and lifted for the opening, then settles
+    assert "sidechaincompress" in fc and "[duck]" in fc
+    assert "afade=t=in:st=0:d=0.800" in fc
+    assert "volume=volume='if(lt(t," in fc and ":eval=frame" in fc
+    assert "[bedf]amix=inputs=2:duration=first" in fc
+
+
+def test_entrance_chain_can_be_disabled():
+    assert render_ffmpeg._entrance_chain({"entrance_seconds": 0}) == "anull"
+    # louder gain -> larger linear multiplier in the expression
+    hot = render_ffmpeg._entrance_chain({"entrance_gain_db": 12, "entrance_seconds": 2})
+    assert "afade=t=in" in hot and "eval=frame" in hot
+
+
 def test_missing_manifest_is_contract_error(tmp_path):
     proj = Project(dir=tmp_path / "p")
     proj.dir.mkdir()

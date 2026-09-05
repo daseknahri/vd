@@ -192,6 +192,75 @@ def _surface_timing_drift(project: Project) -> None:
         say(f'[timing] rebuild from the audio with: python run.py repair-timing "{project.dir}"')
 
 
+def _rerender_after_voice_change(project: Project, cfg: dict, env: dict) -> None:
+    """Re-run the stages that consume the voiceover after it has been rebuilt
+    (re-timed or re-voiced). Revokes gate 2 first — the render the human
+    approved is being replaced, so it must be reviewed again (CLAUDE.md rule 2).
+    Shared by `repair-timing` and the voice-audit auto-heal."""
+    if project.gate_approved(contract.GATE2_APPROVED):
+        project.revoke_gate(contract.GATE2_APPROVED)
+        say("[gate 2] approval revoked - the rebuilt render needs review")
+    for stage in ("captions", "render", "review"):
+        say(f"[{stage}] running (forced)")
+        _load_stage(stage)(project, cfg, env, force=True)
+
+
+def _report_low_similarity(scene_ids: list[int] | None) -> None:
+    if scene_ids:
+        say(f"[voice-audit] scene(s) {scene_ids} read differently from the "
+            f"script (possible mispronunciation) - see voice_audit_report.json")
+
+
+def _surface_voice_defects(project: Project, cfg: dict, env: dict) -> None:
+    """After a real voice run, free-transcribe the voiceover and catch TTS
+    defects that forced alignment hides — chiefly stutters (a word said twice).
+    With voice.auto_fix on (default) + a re-rollable provider (chatterbox), a
+    stutter is healed and the render rebuilt in place; otherwise it is flagged
+    with the explicit fix command. Non-fatal: a missing whisper never fails the
+    run. Gate the whole check off with voice.audit: false."""
+    vcfg = cfg.get("voice") or {}
+    if vcfg.get("audit", True) is False:
+        return
+    if not (project.has(contract.TIMING) and project.has(contract.VOICEOVER)):
+        return  # voice produced no real audio (e.g. faked in tests)
+    try:
+        vv = importlib.import_module("pipeline.verify_voice")
+    except Exception as exc:  # pragma: no cover - import guard
+        say(f"[voice-audit] skipped: {exc}")
+        return
+    provider = str(vcfg.get("provider", "")).strip().lower()
+    # Re-rolling ElevenLabs costs money, so only chatterbox auto-heals; for any
+    # provider we still audit and flag.
+    auto = provider == "chatterbox" and vcfg.get("auto_fix", True) is not False
+    try:
+        if auto:
+            out = vv.fix(project, cfg, env)
+            scenes = out.get("healed", {}).get("scenes", [])
+            fixed = [s["id"] for s in scenes if s.get("fixed")]
+            unfixed = [s["id"] for s in scenes if not s.get("fixed")]
+            if out.get("changed"):
+                if fixed:
+                    say(f"[voice-audit] healed a TTS stutter in scene(s) {fixed} "
+                        f"(re-rolled the voice)")
+                    _rerender_after_voice_change(project, cfg, env)
+                if unfixed:
+                    say(f"[voice-audit] scene(s) {unfixed} still stutter after "
+                        f"re-rolls - edit the narration or retry: "
+                        f'python run.py audit-voice "{project.dir}" --fix')
+            _report_low_similarity(out.get("low_similarity"))
+        else:
+            report = vv.audit(project, cfg)
+            if report["repeat_scenes"]:
+                say(f"[voice-audit] possible TTS stutter in scene(s) "
+                    f"{report['repeat_scenes']} - fix with: "
+                    f'python run.py audit-voice "{project.dir}" --fix')
+            _report_low_similarity(report["low_similarity_scenes"])
+    except (StageError, ContractError) as exc:
+        say(f"[voice-audit] skipped: {exc}")
+    except Exception as exc:  # noqa: BLE001 - whisper/native failure is non-fatal
+        say(f"[voice-audit] skipped (transcription unavailable): {exc}")
+
+
 def _run_stages(project: Project, force_stage: str | None = None) -> Status:
     """Run the pipeline for one project; stop at unapproved gates.
 
@@ -221,6 +290,9 @@ def _run_stages(project: Project, force_stage: str | None = None) -> Status:
             run_fn(project, cfg, env, force=(stage in forced))
             status.last_completed = stage
             if stage == "voice":
+                # Catch (and, for chatterbox, auto-heal) TTS stutters BEFORE the
+                # timing check, since a heal rebuilds timing.json.
+                _surface_voice_defects(project, cfg, env)
                 _surface_timing_drift(project)
         say("all stages complete.")
     except StageError as exc:
@@ -527,17 +599,60 @@ def cmd_repair_timing(args: argparse.Namespace) -> int:
         for w in align.verify_timing(project):
             say(f"[timing] {w}")
         # The re-timed render replaces what the human approved at gate 2.
-        if project.gate_approved(contract.GATE2_APPROVED):
-            project.revoke_gate(contract.GATE2_APPROVED)
-            say("[gate 2] approval revoked - the re-timed render needs review")
-        for stage in ("captions", "render", "review"):
-            say(f"[{stage}] running (forced)")
-            _load_stage(stage)(project, cfg, env, force=True)
+        _rerender_after_voice_change(project, cfg, env)
     except (StageError, ContractError) as exc:
         say(f"error: {exc}")
         return 1
     say("repair complete - re-check the contact sheet before approving gate 2:")
     say(f"  {project.path(contract.CONTACT_SHEET)}")
+    return 0
+
+
+def cmd_audit_voice(args: argparse.Namespace) -> int:
+    """Free-transcribe the voiceover (whisper) and flag TTS stutters (a word
+    said twice) + likely mispronunciations that forced alignment hides.
+
+    With --fix, re-roll stuttering scenes until clean, rebuild the voiceover +
+    timing, and re-render captions/render/review (revokes gate 2, like
+    repair-timing). Without it, only report to voice_audit_report.json."""
+    project = _open_project(args.project_dir)
+    if project is None:
+        return 1
+    vv = importlib.import_module("pipeline.verify_voice")
+    try:
+        cfg = contract.load_config(project.dir)
+        env = contract.load_env()
+        if args.fix:
+            say("[voice-audit] transcribing + healing stutters (whisper)")
+            out = vv.fix(project, cfg, env)
+            scenes = out.get("healed", {}).get("scenes", [])
+            fixed = [s["id"] for s in scenes if s.get("fixed")]
+            unfixed = [s["id"] for s in scenes if not s.get("fixed")]
+            if not out["before_repeats"]:
+                say("[voice-audit] no stutters found - nothing to heal")
+            else:
+                if fixed:
+                    say(f"[voice-audit] healed stutter in scene(s) {fixed}")
+                if unfixed:
+                    say(f"[voice-audit] scene(s) {unfixed} still stutter after "
+                        f"re-rolls - consider editing the narration")
+            _report_low_similarity(out.get("low_similarity"))
+            if out["changed"]:
+                _rerender_after_voice_change(project, cfg, env)
+                say("re-check the contact sheet before approving gate 2:")
+                say(f"  {project.path(contract.CONTACT_SHEET)}")
+        else:
+            say("[voice-audit] transcribing (whisper)")
+            report = vv.audit(project, cfg)
+            say(f"[voice-audit] {len(report['scenes'])} scenes; stutters in "
+                f"{report['repeat_scenes'] or 'none'}; low similarity in "
+                f"{report['low_similarity_scenes'] or 'none'}")
+            say(f"  details: {project.path(vv.VOICE_AUDIT_REPORT)}")
+            if report["repeat_scenes"]:
+                say(f'fix with: python run.py audit-voice "{project.dir}" --fix')
+    except (StageError, ContractError) as exc:
+        say(f"error: {exc}")
+        return 1
     return 0
 
 
@@ -784,6 +899,15 @@ def build_parser() -> argparse.ArgumentParser:
         help="rebuild timing.json from the voiceover (whisper) and re-render")
     p.add_argument("project_dir")
     p.set_defaults(func=cmd_repair_timing)
+
+    p = sub.add_parser(
+        "audit-voice",
+        help="free-transcribe the voiceover to flag/fix TTS stutters + "
+             "mispronunciations")
+    p.add_argument("project_dir")
+    p.add_argument("--fix", action="store_true",
+                   help="re-roll stuttering scenes and re-render (revokes gate 2)")
+    p.set_defaults(func=cmd_audit_voice)
 
     p = sub.add_parser(
         "dub",

@@ -429,8 +429,30 @@ def _audio_filter(voice_idx: int, music_idx: int | None, total: float,
         f"[{music_idx}:a]aloop=loop=-1:size=2147483647,"
         f"atrim=duration={total:.3f},volume={gain}dB[bed];"
         f"[bed][vo_sc]sidechaincompress=threshold={thr}:ratio={ratio}[duck];"
-        f"[vo_mix][duck]amix=inputs=2:duration=first,{master}"
+        f"[duck]{_entrance_chain(acfg)}[bedf];"
+        f"[vo_mix][bedf]amix=inputs=2:duration=first,{master}"
     )
+
+
+def _entrance_chain(acfg: dict) -> str:
+    """Filters applied to the ducked bed so the music *enters* under the opening
+    hook and then settles to its normal (ducked) level — the 'entrance music'
+    the reference channel has. A fade from silence, then a time-varying gain that
+    holds high for `entrance_seconds` and ramps back to unity. All keys optional;
+    set entrance_seconds: 0 to disable and get the plain ducked bed."""
+    es = float(acfg.get("entrance_seconds", 2.0))
+    fade = float(acfg.get("intro_fade", 0.8))
+    if es <= 0:
+        return "anull"
+    g = 10 ** (float(acfg.get("entrance_gain_db", 8.0)) / 20.0)  # dB -> linear
+    ramp = float(acfg.get("entrance_ramp", 1.2))
+    # eval=frame so the gain follows t; commas are protected by the single quotes.
+    env = (
+        f"volume=volume='if(lt(t,{es:.3f}),{g:.4f},"
+        f"if(lt(t,{es + ramp:.3f}),{g:.4f}-({g:.4f}-1)*(t-{es:.3f})/{ramp:.3f},1))'"
+        f":eval=frame"
+    )
+    return f"afade=t=in:st=0:d={fade:.3f},{env}"
 
 
 def _pick_music(cfg: dict) -> Path | None:

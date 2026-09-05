@@ -19,6 +19,16 @@ voice:
   stability: 0.5
   similarity_boost: 0.75
   speed: 1.0
+  # --- Voice-content audit (hardening). After a real voice run the pipeline
+  #     free-transcribes the voiceover (faster-whisper; transcribe.* below) and
+  #     compares it to the script, catching TTS stutters — a word spoken twice,
+  #     e.g. تجاهه/تجاه — that forced alignment silently maps onto the script,
+  #     plus likely mispronunciations (advisory). For chatterbox a stutter is
+  #     auto-healed (the scene is re-rolled, seed 0 = a fresh take) and the
+  #     render rebuilt; for elevenlabs it is only flagged (a re-roll costs $$).
+  #     Also runnable on demand: `python run.py audit-voice <project> [--fix]`.
+  audit: true                 # false = skip the post-voice audit entirely
+  auto_fix: true              # chatterbox only: re-roll + re-render on a stutter
   # usd_per_1k_chars: 0.30    # optional: your plan's rate — enables the $
                               # figure in `python run.py estimate <project>`
   # --- Self-hosted open TTS (fixed cost). To enable, set provider: "chatterbox"
@@ -125,6 +135,13 @@ audio:
   duck_threshold: 0.05               # sidechain compression settings
   duck_ratio: 8
   loudness_lufs: -16                 # EBU R128 target (per-platform spec)
+  # Entrance music: the bed rises under the opening hook, then settles to the
+  # ducked level (the reference channel's "entrance"). Needs a track in
+  # music_dir — synthesize a simple one with: python tools/make_music_bed.py
+  entrance_seconds: 2.0              # how long the opening swell holds (0 = off)
+  entrance_gain_db: 8                # how much louder the bed is during it
+  entrance_ramp: 1.2                 # seconds to ramp back down to the bed level
+  intro_fade: 0.8                    # music fades in from silence over this
 
 transcribe:
   model: "small"                     # faster-whisper model size
