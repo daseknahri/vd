@@ -1,12 +1,13 @@
-"""Generated illustrated B-roll via ComfyUI (SDXL + a storybook LoRA) + a cheap
-Ken Burns pan — a fixed-cost alternative to photoreal LTX video for the
-storybook/book-summary look.
+"""Generated illustrated B-roll via ComfyUI (SDXL + a storybook LoRA) + a subtle
+Ken Burns zoom — a fixed-cost alternative to photoreal LTX video for the warm
+hand-drawn book-summary look (reverse-engineered from The Novel Gist).
 
-Per scene it generates ONE hand-drawn watercolor illustration (SDXL base +
+Per scene it generates ONE warm hand-drawn storybook illustration (SDXL base +
 StoryBookRedmond LoRA, VAE-fp16-fix), then animates the still into a
-scene-length 9:16 clip with an ffmpeg crop-pan (zoompan is ~100x slower on an
-8 GB card, so we pan a slightly-oversized still — ~1.6s/clip vs ~120s). Writes
-clips/scene_XXX.mp4, so the render stage assembles it unchanged.
+scene-length 9:16 clip with a gentle centred push-in/out zoom (ffmpeg zoompan
+with a modest pre-scale — ~1.7s/clip; the earlier 'too slow' was an over-large
+pre-scale). The zoom replaces a diagonal crop-pan whose drift read as an AI
+tell. Writes clips/scene_XXX.mp4, so the render stage assembles it unchanged.
 
 Style + a byte-identical character string across scenes (plus the LoRA) are what
 keep the art cohesive; the per-scene `broll_prompt` (written illustrated by the
@@ -35,21 +36,22 @@ from pipeline.errors import StageError
 STAGE = "footage"
 
 # The LoRA trigger word must appear in the prompt; the negative locks the style.
-LORA_TRIGGER = "Stickers, sticker"   # StickersRedmond LoRA activation
+# Warm hand-drawn storybook — reverse-engineered from The Novel Gist's actual
+# videos (soft warm colouring, gentle ink linework, simple expressive character),
+# NOT the flat pastel "sticker" look we started with.
+LORA_TRIGGER = "KidsRedmAF"   # StoryBookRedmond LoRA activation
 DEFAULT_STYLE_SUFFIX = (
-    "children's picture book illustration, flat cel-shaded coloring, bold clean black "
-    "ink outlines, soft pastel colors, minimal shading, plenty of white negative space, "
-    "airy uncluttered background, whimsical simple character design, big round friendly "
-    "eyes, clean vector-style linework, bright even lighting"
+    "warm soft hand-drawn storybook illustration, gentle clean ink linework, soft warm "
+    "colouring, muted cozy earthy palette, simple friendly expressive character, light "
+    "airy uncluttered background, wholesome children's picture-book art, tender gentle mood"
 )
 DEFAULT_NEGATIVE = (
-    "painterly, oil painting, thick impasto, heavy brush texture, canvas texture, "
-    "paper grain, watercolor bleed, muddy colors, dark, moody, low-key lighting, "
-    "dramatic shadows, sepia, gritty, grunge, cluttered background, busy background, "
-    "dense detail, cross-hatching, sketchy rough lineart, blurry lines, photorealistic, "
-    "realistic, 3d render, cgi, sticker die-cut border, white outline border, vinyl "
-    "decal edge, logo, badge, frame, border, text, watermark, signature, extra limbs, "
-    "extra fingers, deformed hands, disfigured face, low quality, jpeg artifacts"
+    "flat sticker, die-cut border, vinyl decal edge, white outline border, vector clipart, "
+    "bright neon, oversaturated, garish, dark, moody, gritty, grunge, dramatic harsh "
+    "shadows, heavy black shadows, low-key lighting, sepia, photorealistic, realistic photo, "
+    "3d render, cgi, anime, manga, harsh sketchy lineart, cluttered busy background, "
+    "logo, badge, frame, border, text, watermark, signature, extra limbs, extra fingers, "
+    "deformed hands, disfigured face, low quality, jpeg artifacts"
 )
 
 _HTTP_TIMEOUT = 30
@@ -162,16 +164,16 @@ class ComfyImageBroll:
 # -- module helpers -----------------------------------------------------------
 def _trim_flat_border(png: bytes, *, white: int = 252, frac: float = 0.97,
                       max_trim: float = 0.14) -> bytes:
-    """Crop the flat, near-pure-white die-cut band the StickersRedmond LoRA
-    occasionally leaves along ONE edge (a "sticker" margin) — otherwise the Ken
-    Burns pan drifts it into frame as a white bar (measured up to ~9% on a bad
-    seed). A row/col counts as margin only if ≥`frac` of its pixels are
-    near-pure white (≥`white`); real content, pale sky gradients and snowy
-    scenes carry linework/shadow, so they never reach that purity and are left
-    untouched. Trims at most `max_trim` per side (a full-bleed still returns
-    unchanged). English-only stills; no text involved. Best-effort: anything
-    that will not decode as an image is returned unchanged (trim is cosmetic,
-    never fatal)."""
+    """Safety trim for a flat, near-pure-white die-cut band a LoRA can leave
+    along ONE edge (the StickersRedmond 'sticker' margin was the original case,
+    measured up to ~9% on a bad seed) — otherwise the zoom drifts it into frame
+    as a white bar. A row/col counts as margin only if ≥`frac` of its pixels are
+    near-pure white (≥`white`); real content, warm watercolour washes and pale
+    (but textured) storybook backgrounds carry linework/tone, so they never
+    reach that purity and are left untouched. Trims at most `max_trim` per side
+    (a full-bleed still returns unchanged). English-only stills; no text
+    involved. Best-effort: anything that will not decode as an image is returned
+    unchanged (trim is cosmetic, never fatal)."""
     try:
         img = Image.open(BytesIO(png)).convert("RGB")
     except Exception:
@@ -210,28 +212,32 @@ def _trim_flat_border(png: bytes, *, white: int = 252, frac: float = 0.97,
 
 def _ken_burns(png: bytes, out_mp4: Path, dur: float, fps: int,
                w: int, h: int, seed: int) -> None:
-    """Animate a still into a `dur`-second w:h clip via a cheap crop-pan
-    (zoompan is far too slow on 8 GB). Pan direction varies with seed so
-    consecutive scenes don't all drift the same way."""
+    """Animate a still into a `dur`-second w:h clip with a SUBTLE centered
+    push-in / push-out zoom — the reference channel's motion. This replaces the
+    old diagonal crop-pan, whose corner-to-corner drift reads as an AI tell;
+    a gentle zoom from the centre reads as intentional 'storybook' motion.
+    Direction alternates by seed so consecutive scenes don't all push the same
+    way. zoompan stays fast with a modest pre-scale + a single input frame
+    (d = the whole clip); the earlier 'too slow' was an over-large pre-scale."""
     out_mp4.parent.mkdir(parents=True, exist_ok=True)
-    bw, bh = int(w * 1.18), int(h * 1.18)   # oversize for pan headroom
-    dx, dy = bw - w, bh - h
-    # four gentle diagonal directions
-    x_from, x_to, y_from, y_to = {
-        0: (0, dx, 0, dy), 1: (dx, 0, dy, 0),
-        2: (0, dx, dy, 0), 3: (dx, 0, 0, dy),
-    }[seed % 4]
-    xe = f"({x_from}+({x_to}-{x_from})*t/{dur:.3f})"
-    ye = f"({y_from}+({y_to}-{y_from})*t/{dur:.3f})"
+    frames = max(1, round(dur * fps))
+    zmax = 1.12                              # 12% zoom across the clip — gentle
+    step = (zmax - 1.0) / max(1, frames - 1)
+    if seed % 2:                             # push out
+        zexpr = f"max({zmax:.4f}-on*{step:.6f},1.0)"
+    else:                                    # push in
+        zexpr = f"min(1.0+on*{step:.6f},{zmax:.4f})"
+    pw, ph = round(w * 1.35), round(h * 1.35)   # modest pre-scale = smooth + fast
+    vf = (
+        f"scale={pw}:{ph}:force_original_aspect_ratio=increase,crop={pw}:{ph},"
+        f"zoompan=z='{zexpr}':d={frames}:x='iw/2-(iw/zoom/2)':"
+        f"y='ih/2-(ih/zoom/2)':s={w}x{h}:fps={fps},format=yuv420p"
+    )
     with tempfile.TemporaryDirectory(prefix="img-") as tmp:
         src = Path(tmp) / "still.png"
         src.write_bytes(png)
-        vf = (f"scale={bw}:{bh}:force_original_aspect_ratio=increase,"
-              f"crop={bw}:{bh},crop={w}:{h}:x='{xe}':y='{ye}',"
-              f"fps={fps},format=yuv420p")
         cmd = [ffmpeg_path("ffmpeg"), "-y", "-hide_banner", "-loglevel", "error",
-               "-loop", "1", "-framerate", str(fps), "-t", f"{dur:.3f}", "-i", str(src),
-               "-vf", vf, "-c:v", "libx264", "-pix_fmt", "yuv420p",
+               "-i", str(src), "-vf", vf, "-c:v", "libx264", "-pix_fmt", "yuv420p",
                "-movflags", "+faststart", str(out_mp4)]
         proc = subprocess.run(cmd, capture_output=True, text=True,
                               encoding="utf-8", errors="replace")
@@ -247,8 +253,8 @@ def build(fcfg: dict) -> ComfyImageBroll:
     return ComfyImageBroll(
         url=str(b.get("comfy_url", "http://127.0.0.1:8188")),
         checkpoint=str(img.get("checkpoint", "sd_xl_base_1.0.safetensors")),
-        lora=str(img.get("lora", "StickersRedmond.safetensors")),
-        lora_strength=float(img.get("lora_strength", 0.72)),
+        lora=str(img.get("lora", "StoryBookRedmond-KidsRedmAF.safetensors")),
+        lora_strength=float(img.get("lora_strength", 0.85)),
         vae=str(img.get("vae", "sdxl_vae.safetensors")),
         width=int(img.get("width", 768)),
         height=int(img.get("height", 1344)),

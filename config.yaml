@@ -86,8 +86,8 @@ footage:
     #     Generates one hand-drawn watercolor illustration per scene (fixed-cost).
     image:
       checkpoint: "sd_xl_base_1.0.safetensors"
-      lora: "StickersRedmond.safetensors"   # clean bold outlines + flat cel color (light look)
-      lora_strength: 0.72            # keep <=0.75 to avoid a die-cut "sticker rim"
+      lora: "StoryBookRedmond-KidsRedmAF.safetensors"  # warm soft hand-drawn storybook
+      lora_strength: 0.85            # (trigger "KidsRedmAF" — see broll_image.LORA_TRIGGER)
       vae: "sdxl_vae.safetensors"    # fp16-fix VAE (avoids black frames)
       width: 768                     # SDXL 9:16 latent bucket
       height: 1344

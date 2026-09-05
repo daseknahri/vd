@@ -39,7 +39,7 @@ def test_prompt_for_scene_falls_back_to_keywords_and_style_suffix():
 def test_build_defaults():
     g = broll_image.build({})
     assert g.checkpoint == "sd_xl_base_1.0.safetensors"
-    assert "StickersRedmond" in g.lora
+    assert "StoryBookRedmond" in g.lora
     assert g.steps == 26
     assert g.cfg == 6.0
     assert g.width == 768 and g.height == 1344
