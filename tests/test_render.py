@@ -345,6 +345,23 @@ def test_audio_filter_gentle_duck_and_outro_fade():
     assert "afade=t=out:st=2.000:d=2.000[bedf]" in fc
 
 
+def test_apply_video_fades_adds_in_and_matched_out():
+    parts = []
+    lbl = render_ffmpeg._apply_video_fades(parts, "[vcat]", 10.0, {},
+                                           {"outro_fade": 2.0})
+    assert lbl == "[vfinal]"
+    joined = ";".join(parts)
+    assert "[vcat]fade=t=in:st=0:d=0.500" in joined
+    assert "fade=t=out:st=8.000:d=2.000[vfinal]" in joined
+
+
+def test_apply_video_fades_can_disable():
+    parts = []
+    lbl = render_ffmpeg._apply_video_fades(
+        parts, "[vcat]", 10.0, {"video": {"fade_in": 0, "fade_out": 0}}, {})
+    assert lbl == "[vcat]" and parts == []
+
+
 def test_missing_manifest_is_contract_error(tmp_path):
     proj = Project(dir=tmp_path / "p")
     proj.dir.mkdir()

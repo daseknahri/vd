@@ -26,7 +26,7 @@ from pathlib import Path
 from typing import Any
 
 from pipeline import contract, wordtiming
-from pipeline.contract import ffmpeg_path
+from pipeline.contract import ContractError, ffmpeg_path
 from pipeline.errors import StageError
 
 STAGE = "voice"
@@ -229,16 +229,44 @@ def _wav_to_mp3(wav: bytes) -> bytes:
         return mp3_path.read_bytes()
 
 
+def _resolve_reference(scfg: dict) -> tuple[str, str]:
+    """(ref_file, ref_text) for the clone. An empty ref_file uses SILMA's bundled
+    reference. A relative ref_file resolves against the repo root. ref_text comes
+    from config, else a sibling `<stem>.txt` next to the wav — a matching
+    transcript is REQUIRED (an empty one makes SILMA auto-transcribe, which hits a
+    broken torchcodec on Windows), and the clip must be < 8s or SILMA clips it and
+    drops the transcript."""
+    ref = str(scfg.get("ref_file") or "").strip()
+    if not ref:
+        return str(DEFAULT_REF_FILE), DEFAULT_REF_TEXT
+    p = Path(ref)
+    if not p.is_absolute():
+        p = contract.ROOT / ref
+    ref_text = str(scfg.get("ref_text") or "").strip()
+    if not ref_text:
+        sib = p.with_suffix(".txt")
+        if sib.exists():
+            ref_text = sib.read_text(encoding="utf-8").strip()
+    if not ref_text:
+        raise ContractError(
+            f"voice.silma.ref_file is set ({ref}) but there is no ref_text — add "
+            f"voice.silma.ref_text, or a sibling {p.stem}.txt with the transcript."
+        )
+    return str(p), ref_text
+
+
 def build(voice_cfg: dict, env: dict, transcribe_cfg: dict | None = None) -> "SilmaTTS":
     """Construct from config `voice.silma`. Sensible defaults use the bundled
-    reference voice; set voice.silma.ref_file/ref_text to clone another narrator."""
+    reference voice; set voice.silma.ref_file (+ a transcript) to clone another
+    narrator — see _resolve_reference."""
     scfg = (voice_cfg or {}).get("silma") or {}
     silma_python = str(scfg.get("silma_python") or env.get("VD_SILMA_PYTHON")
                        or DEFAULT_SILMA_PYTHON)
+    ref_file, ref_text = _resolve_reference(scfg)
     return SilmaTTS(
         silma_python=silma_python,
-        ref_file=str(scfg.get("ref_file") or DEFAULT_REF_FILE),
-        ref_text=str(scfg.get("ref_text") or DEFAULT_REF_TEXT),
+        ref_file=ref_file,
+        ref_text=ref_text,
         seed=int(scfg.get("seed", 0) or 0),
         hf_home=str(scfg.get("hf_home") or env.get("HF_HOME") or r"D:\vd-ai\models"),
         nfe_step=int(scfg.get("nfe_step", 16)),

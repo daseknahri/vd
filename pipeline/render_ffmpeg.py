@@ -193,6 +193,11 @@ def run(project: Project, cfg: dict, env: dict, *, force: bool = False) -> None:
             cur = f"[vic{k}]"
         vlabel = cur
 
+    # Gentle fade from/to black on the whole picture: a fade-in on the open and a
+    # fade-out that matches the music's outro so the ending doesn't hard-cut
+    # against a fading track (research: a hard visual cut reads as unfinished).
+    vlabel = _apply_video_fades(parts, vlabel, total, cfg, acfg)
+
     parts.append(_audio_filter(voice_idx, music_idx, total, acfg))
 
     cmd += [
@@ -466,6 +471,25 @@ def _entrance_chain(acfg: dict) -> str:
         f":eval=frame"
     )
     return f"afade=t=in:st=0:d={fade:.3f},{env}"
+
+
+def _apply_video_fades(parts: list, vlabel: str, total: float, cfg: dict,
+                       acfg: dict) -> str:
+    """Append a fade-in/out on the final picture and return the new video label.
+    The fade-out length defaults to the music outro so audio + picture resolve
+    together. Config: video.fade_in / video.fade_out (0 disables either)."""
+    vcfg = cfg.get("video") or {}
+    fin = float(vcfg.get("fade_in", 0.5))
+    fout = float(vcfg.get("fade_out", acfg.get("outro_fade", 2.0)))
+    steps = []
+    if fin > 0:
+        steps.append(f"fade=t=in:st=0:d={fin:.3f}")
+    if fout > 0:
+        steps.append(f"fade=t=out:st={max(0.0, total - fout):.3f}:d={fout:.3f}")
+    if not steps:
+        return vlabel
+    parts.append(f"{vlabel}{','.join(steps)}[vfinal]")
+    return "[vfinal]"
 
 
 def _pick_music(cfg: dict) -> Path | None:

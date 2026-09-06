@@ -10,6 +10,7 @@ import wave
 import pytest
 
 from pipeline import silma_tts
+from pipeline.contract import ContractError
 from pipeline.errors import StageError
 
 
@@ -90,5 +91,34 @@ def test_request_payload_carries_ref_and_text(monkeypatch):
     monkeypatch.setattr(silma_tts, "_wav_to_mp3", lambda wav: b"m")
     monkeypatch.setattr(p, "_align", lambda *a: {"characters": []})
     p.synthesize("النص", "prev", "next")
-    assert seen["text"] == "النص" and seen["ref_file"] == "r.wav"
+    assert seen["text"] == "النص"
+    assert seen["ref_file"].replace("\\", "/").endswith("r.wav")  # resolved abs path
     assert seen["ref_text"] == "ref" and seen["force_tashkeel"] is True
+
+
+def test_resolve_reference_default_is_bundled():
+    rf, rt = silma_tts._resolve_reference({})
+    assert rf == str(silma_tts.DEFAULT_REF_FILE) and rt == silma_tts.DEFAULT_REF_TEXT
+
+
+def test_resolve_reference_reads_sibling_transcript(tmp_path):
+    wav = tmp_path / "narr.wav"
+    wav.write_bytes(b"\0")
+    (tmp_path / "narr.txt").write_text("نص المرجع", encoding="utf-8")
+    rf, rt = silma_tts._resolve_reference({"ref_file": str(wav)})
+    assert rf == str(wav) and rt == "نص المرجع"
+
+
+def test_resolve_reference_inline_text_wins(tmp_path):
+    wav = tmp_path / "narr.wav"
+    wav.write_bytes(b"\0")
+    _rf, rt = silma_tts._resolve_reference(
+        {"ref_file": str(wav), "ref_text": "inline"})
+    assert rt == "inline"
+
+
+def test_resolve_reference_missing_transcript_raises(tmp_path):
+    wav = tmp_path / "narr.wav"
+    wav.write_bytes(b"\0")
+    with pytest.raises(ContractError, match="ref_text"):
+        silma_tts._resolve_reference({"ref_file": str(wav)})
