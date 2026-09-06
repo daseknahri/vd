@@ -46,7 +46,9 @@ class FakeWhisper:
 def test_build_uses_bundled_reference_by_default():
     p = silma_tts.build({}, {})
     assert p.ref_file == str(silma_tts.DEFAULT_REF_FILE)
-    assert p.force_tashkeel is True and p.nfe_step == 16
+    # force_tashkeel defaults False: the voice stage diacritizes + applies
+    # overrides so pronunciation is correctable.
+    assert p.force_tashkeel is False and p.nfe_step == 16
 
 
 def test_signature_changes_with_seed():
@@ -93,7 +95,7 @@ def test_request_payload_carries_ref_and_text(monkeypatch):
     p.synthesize("النص", "prev", "next")
     assert seen["text"] == "النص"
     assert seen["ref_file"].replace("\\", "/").endswith("r.wav")  # resolved abs path
-    assert seen["ref_text"] == "ref" and seen["force_tashkeel"] is True
+    assert seen["ref_text"] == "ref" and seen["force_tashkeel"] is False
 
 
 def test_resolve_reference_default_is_bundled():

@@ -272,6 +272,6 @@ def build(voice_cfg: dict, env: dict, transcribe_cfg: dict | None = None) -> "Si
         nfe_step=int(scfg.get("nfe_step", 16)),
         cfg_strength=float(scfg.get("cfg_strength", 2.0)),
         speed=float(scfg.get("speed", 1.0)),
-        force_tashkeel=bool(scfg.get("force_tashkeel", True)),
+        force_tashkeel=bool(scfg.get("force_tashkeel", False)),
         transcribe_cfg=transcribe_cfg,
     )

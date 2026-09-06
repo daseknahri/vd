@@ -79,7 +79,10 @@ voice:
     nfe_step: 16                # diffusion steps (quality/speed; 16 is the default)
     cfg_strength: 2.0           # guidance
     speed: 1.0
-    force_tashkeel: true        # let SILMA add diacritics (its reliable path)
+    force_tashkeel: false       # false (recommended): WE add tashkeel (CATT) and
+                                #   apply pronunciation.json overrides, so wrong
+                                #   vowels/names are correctable. true: SILMA adds
+                                #   them itself (overrides won't apply).
 
   # Per-scene expressive delivery + designed pauses. Maps each scene's `mood`
   # to Chatterbox emotion params and the breath AFTER the scene, so the read

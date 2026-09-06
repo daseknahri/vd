@@ -248,7 +248,7 @@ def test_ramble_guard_falls_back_to_plain(tmp_path, monkeypatch):
     assert "مرحبا بكم في المصنعَ" in sent   # the rambling diacritized take was tried first
 
 
-def test_run_silma_sends_plain_text_no_diacritize(tmp_path, monkeypatch):
+def test_run_silma_force_tashkeel_sends_plain(tmp_path, monkeypatch):
     project = _make_project(tmp_path)
     fake = FakeTTS()
     monkeypatch.setattr(voice, "_build_provider", lambda cfg, env: fake)
@@ -256,15 +256,30 @@ def test_run_silma_sends_plain_text_no_diacritize(tmp_path, monkeypatch):
     monkeypatch.setattr(voice, "_concat_mp3s", _stub_concat)
 
     def _no_diac(texts):
-        raise AssertionError("diacritize must not run for the silma provider")
+        raise AssertionError("diacritize must not run when SILMA does tashkeel")
     monkeypatch.setattr(voice.diacritize, "diacritize_batch", _no_diac)
+
+    voice.run(project,
+              {"voice": {"provider": "silma", "silma": {"force_tashkeel": True}}},
+              ENV)
+    # force_tashkeel: SILMA diacritizes internally -> plain narrations sent
+    assert "مرحبا بكم في المصنع" in [c[0] for c in fake.calls]
+
+
+def test_run_silma_default_diacritizes_for_overrides(tmp_path, monkeypatch):
+    project = _make_project(tmp_path)
+    fake = FakeTTS()
+    monkeypatch.setattr(voice, "_build_provider", lambda cfg, env: fake)
+    monkeypatch.setattr(voice, "_probe_duration", lambda p: 2.0)
+    monkeypatch.setattr(voice, "_concat_mp3s", _stub_concat)
+    # default (force_tashkeel false): the voice stage diacritizes so overrides apply
+    monkeypatch.setattr(voice.diacritize, "diacritize_batch",
+                        lambda texts: [t + "َ" for t in texts])
 
     voice.run(project, {"voice": {"provider": "silma"}}, ENV)
 
-    # SILMA diacritizes internally -> plain narrations are sent verbatim
-    sent = [c[0] for c in fake.calls]
-    assert "مرحبا بكم في المصنع" in sent
-    assert "هذه خوارزمية، مذهلة حقا" in sent
+    # the diacritized form (not the plain narration) is what SILMA receives
+    assert "مرحبا بكم في المصنعَ" in [c[0] for c in fake.calls]
 
 
 def test_run_writes_voice_report_with_char_counts(tmp_path, patched):

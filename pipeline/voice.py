@@ -539,9 +539,19 @@ def _synthesize_project(project: contract.Project, script: dict,
     # spelling are handled inside _spoken_text.
     provider_name = str((voice_cfg or {}).get("provider", "")).strip().lower()
     if provider_name == "silma":
-        # SILMA diacritizes internally (CATT) and is stable — send plain text and
-        # skip our diacritization + ramble guard (both Chatterbox-only workarounds).
-        spoken = list(narrations)
+        # SILMA is stable, so no ramble guard. WHO adds the vowel marks decides
+        # whether pronunciation is correctable: with force_tashkeel: false
+        # (recommended) WE diacritize (CATT) + apply pronunciation.json overrides,
+        # so any wrong vowel/name is fixable and SILMA reads our text verbatim.
+        # With force_tashkeel: true, SILMA diacritizes internally (overrides do
+        # not apply).
+        silma_cfg = (voice_cfg or {}).get("silma") or {}
+        if silma_cfg.get("force_tashkeel", False):
+            spoken = list(narrations)
+        else:
+            diac = diacritize.diacritize_batch(narrations)
+            spoken = [_spoken_text(n, overrides, diac[i])
+                      for i, n in enumerate(narrations)]
         spoken_plain = spoken
         ramble_guard = False
     else:
