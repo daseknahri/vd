@@ -166,20 +166,24 @@ def run(project: Project, cfg: dict, env: dict, *, force: bool = False) -> None:
     ]
     parts.append("".join(f"[v{i}]" for i in range(n))
                  + f"concat=n={n}:v=1:a=0[vcat]")
+    # One unifying grade pass (warm storybook look + a consistent look across the
+    # SDXL / LTX / stock sources), applied ONCE before captions so the text and
+    # icons composited afterward stay crisp and ungraded.
+    base = _apply_video_grade(parts, "[vcat]", cfg)
     if cap_idx is not None:
         parts.append(
-            f"[vcat][{cap_idx}:v]overlay=x=0:y={band['y']}:shortest=1[vout]"
+            f"{base}[{cap_idx}:v]overlay=x=0:y={band['y']}:shortest=1[vout]"
         )
         vlabel = "[vout]"
     else:
-        vlabel = "[vcat]"
+        vlabel = base
 
     # Pop-in emphasis icons: each fades in at its scene's beat, held to the
     # scene end, in the upper area (clear of the lower caption band).
     if icon_specs:
         iw = round(width * 0.15)
         ix = round(width * 0.58)
-        iy = round(height * 0.10)
+        iy = round(height * 0.14)          # below the ~250px top UI risk zone
         cur = vlabel
         for k, (_png, appear, end) in enumerate(icon_specs):
             parts.append(
@@ -471,6 +475,35 @@ def _entrance_chain(acfg: dict) -> str:
         f":eval=frame"
     )
     return f"afade=t=in:st=0:d={fade:.3f},{env}"
+
+
+def _apply_video_grade(parts: list, in_label: str, cfg: dict) -> str:
+    """One unifying colour grade: a gentle contrast/saturation lift, a touch of
+    warmth, a barely-there vignette, and light luma-only film grain. Returns the
+    new video label. Config `video.grade`: false disables it; a dict overrides
+    any of eq / temperature / temp_mix / vignette / grain."""
+    gcfg = (cfg.get("video") or {}).get("grade", True)
+    if gcfg is False:
+        return in_label
+    g = gcfg if isinstance(gcfg, dict) else {}
+    chain = []
+    eq = g.get("eq", "contrast=1.06:saturation=1.08:gamma=0.98")
+    if eq:
+        chain.append(f"eq={eq}")
+    temp = g.get("temperature", 5500)
+    mix = g.get("temp_mix", 0.25)
+    if temp and mix:
+        chain.append(f"colortemperature=temperature={temp}:mix={mix}")
+    vig = g.get("vignette", "PI/6")
+    if vig:
+        chain.append(f"vignette={vig}")
+    grain = g.get("grain", 6)
+    if grain:
+        chain.append(f"noise=c0_strength={grain}:c0_flags=t")
+    if not chain:
+        return in_label
+    parts.append(f"{in_label}{','.join(chain)}[vgraded]")
+    return "[vgraded]"
 
 
 def _apply_video_fades(parts: list, vlabel: str, total: float, cfg: dict,

@@ -149,7 +149,9 @@ captions:
   highlight_color: "&H0000D7FF"      # karaoke highlight — amber (karaoke style only)
   outline_color: "&H00000000"        # black stroke
   outline: 4                         # thick stroke (the bold-caption look)
-  margin_v: 300                      # lower-middle; clear of platform UI overlays
+  margin_v: 480                      # lower-third, ABOVE the ~510px bottom UI risk
+                                     # zone (TikTok/Reels/Shorts 2026 caption+CTA
+                                     # bar); was 300 = clipped by platform UI
   karaoke: true                      # fallback selector when `style` is unset
   # --- kinetic caption style (reverse-engineered from The Novel Gist) ---
   style: "reveal"                    # "reveal" = words type on one at a time with a

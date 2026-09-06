@@ -362,6 +362,22 @@ def test_apply_video_fades_can_disable():
     assert lbl == "[vcat]" and parts == []
 
 
+def test_apply_video_grade_default_chain():
+    parts = []
+    lbl = render_ffmpeg._apply_video_grade(parts, "[vcat]", {})
+    assert lbl == "[vgraded]"
+    joined = ";".join(parts)
+    for f in ("eq=contrast=1.06", "colortemperature=temperature=5500:mix=0.25",
+              "vignette=PI/6", "noise=c0_strength=6:c0_flags=t"):
+        assert f in joined
+
+
+def test_apply_video_grade_can_disable():
+    parts = []
+    lbl = render_ffmpeg._apply_video_grade(parts, "[vcat]", {"video": {"grade": False}})
+    assert lbl == "[vcat]" and parts == []
+
+
 def test_missing_manifest_is_contract_error(tmp_path):
     proj = Project(dir=tmp_path / "p")
     proj.dir.mkdir()

@@ -221,12 +221,19 @@ def _ken_burns(png: bytes, out_mp4: Path, dur: float, fps: int,
     (d = the whole clip); the earlier 'too slow' was an over-large pre-scale."""
     out_mp4.parent.mkdir(parents=True, exist_ok=True)
     frames = max(1, round(dur * fps))
-    zmax = 1.12                              # 12% zoom across the clip — gentle
-    step = (zmax - 1.0) / max(1, frames - 1)
-    if seed % 2:                             # push out
-        zexpr = f"max({zmax:.4f}-on*{step:.6f},1.0)"
+    n1 = max(1, frames - 1)
+    # Per-scene zoom amount (1.08..1.16) so consecutive clips don't feel identical.
+    zmax = 1.08 + (seed % 5) * 0.02
+    # Smoothstep-eased zoom: t*t*(3-2t) starts and settles gently, reading as an
+    # intentional camera move rather than the mechanical constant-rate push a
+    # linear ramp gives. Inlined (no st/ld/';') so it's safe in a -vf string.
+    t = f"clip(on/{n1},0,1)"
+    eased = f"({t}*{t}*(3-2*{t}))"
+    span = zmax - 1.0
+    if seed % 2:                             # push out (start zoomed, settle)
+        zexpr = f"{zmax:.4f}-{span:.4f}*{eased}"
     else:                                    # push in
-        zexpr = f"min(1.0+on*{step:.6f},{zmax:.4f})"
+        zexpr = f"1+{span:.4f}*{eased}"
     pw, ph = round(w * 1.35), round(h * 1.35)   # modest pre-scale = smooth + fast
     vf = (
         f"scale={pw}:{ph}:force_original_aspect_ratio=increase,crop={pw}:{ph},"
