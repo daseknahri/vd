@@ -221,8 +221,18 @@ def run(project: Project, cfg: dict, env: dict, *, force: bool = False) -> None:
     # against a fading track (research: a hard visual cut reads as unfinished).
     vlabel = _apply_video_fades(parts, vlabel, total, cfg, acfg)
 
+    # Playback speed (video.speed, default 1.0): a single uniform time-scale on
+    # the fully composited picture + master audio, applied LAST so every overlay
+    # (captions/icons/SFX/fades, all built on the natural timeline) stays locked
+    # in sync — the output just plays faster. atempo preserves pitch.
+    speed = float((cfg.get("video") or {}).get("speed", 1.0))
+    report["speed"] = speed
+    if abs(speed - 1.0) > 1e-3:
+        parts.append(f"{vlabel}setpts=PTS/{speed:.4f}[vspeed]")
+        vlabel = "[vspeed]"
+
     parts.append(_audio_filter(voice_idx, music_idx, total, acfg,
-                               sfx_idx=sfx_idx))
+                               sfx_idx=sfx_idx, speed=speed))
 
     cmd += [
         "-filter_complex", ";".join(parts),
@@ -485,10 +495,32 @@ def _assemble_scenes(parts: list, scene_rows: list, w: int, h: int, fps: Any,
     return cur
 
 
+def _atempo_chain(speed: float) -> str:
+    """A `,atempo=...` fragment (leading comma) that time-stretches audio by
+    `speed` while preserving pitch. atempo takes 0.5..2.0 per instance, so
+    extreme factors are chained. Returns "" at unity speed."""
+    if abs(speed - 1.0) <= 1e-3:
+        return ""
+    factors = []
+    s = speed
+    while s > 2.0 + 1e-9:
+        factors.append(2.0)
+        s /= 2.0
+    while s < 0.5 - 1e-9:
+        factors.append(0.5)
+        s /= 0.5
+    factors.append(s)
+    return "," + ",".join(f"atempo={f:.4f}" for f in factors)
+
+
 def _audio_filter(voice_idx: int, music_idx: int | None, total: float,
-                  acfg: dict, *, sfx_idx: int | None = None) -> str:
+                  acfg: dict, *, sfx_idx: int | None = None,
+                  speed: float = 1.0) -> str:
     lufs = _need(acfg, "loudness_lufs", "audio")
-    master = f"loudnorm=I={lufs}:TP=-1.5:LRA=11,aresample=48000[aout]"
+    # atempo rides at the very end (after loudnorm) so the whole mix — voice,
+    # bed, SFX — speeds together and stays locked to the sped-up picture.
+    master = (f"loudnorm=I={lufs}:TP=-1.5:LRA=11,aresample=48000"
+              f"{_atempo_chain(speed)}[aout]")
     # The transition-SFX bed (pre-built, full length) is an optional extra amix
     # input, level set by audio.sfx.gain_db. It is NOT ducked or graded — the
     # page turns are meant to punctuate the cut, and loudnorm sets the master.

@@ -16,6 +16,10 @@ video:
   #   vignette, grain}. grain>0 opts into film grain (bitrate-heavy).
   # fade_in: 0.5              # picture fade from black on the open (seconds)
   # fade_out: 2.0             # picture fade to black (default = the music outro)
+  speed: 1.0                  # playback speed of the finished cut (1.0 = natural).
+                              #   A single uniform time-scale applied LAST, so every
+                              #   overlay stays in sync and pitch is preserved
+                              #   (atempo). e.g. 1.15 = 15% brisker. Per-project.
 
 script:
   audience: "general Arab"
@@ -202,7 +206,7 @@ audio:
   # `min_gap` so oscillating moods don't put a turn on every cut.
   sfx:
     file: "assets/sfx/page.wav"       # 0.35s page-turn (synth); swap for a richer one
-    gain_db: -11                      # level vs the voice (loudnorm sets the master)
+    gain_db: -16                      # subtle under the voice (was -11 = a touch loud)
     at: "sections"                    # "sections" (mood-shift, coalesced) | "every_scene"
     min_gap: 14                       # seconds — never two turns closer than this (auto)
     lead: 0.10                        # place the turn this many seconds before the cut

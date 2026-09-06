@@ -415,6 +415,22 @@ def test_build_sfx_bed_matches_timeline(tmp_path):
     assert render_ffmpeg._build_sfx_bed([], src, TOTAL, work, report, proj) is None
 
 
+def test_audio_filter_speed_appends_atempo_after_master():
+    acfg = _cfg("unused")["audio"]
+    fc = render_ffmpeg._audio_filter(2, 3, TOTAL, acfg, speed=1.15)
+    assert "aresample=48000,atempo=1.1500[aout]" in fc
+    # unity speed -> no atempo
+    assert "atempo" not in render_ffmpeg._audio_filter(2, 3, TOTAL, acfg)
+
+
+def test_atempo_chain_chains_extreme_factors():
+    assert render_ffmpeg._atempo_chain(1.0) == ""
+    assert render_ffmpeg._atempo_chain(1.15) == ",atempo=1.1500"
+    # >2.0 must chain (each instance is capped at 2.0)
+    chain = render_ffmpeg._atempo_chain(3.0)
+    assert chain.count("atempo=") == 2 and "atempo=2.0000" in chain
+
+
 def test_apply_video_fades_adds_in_and_matched_out():
     parts = []
     lbl = render_ffmpeg._apply_video_fades(parts, "[vcat]", 10.0, {},
