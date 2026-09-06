@@ -497,7 +497,10 @@ def _apply_video_grade(parts: list, in_label: str, cfg: dict) -> str:
     vig = g.get("vignette", "PI/6")
     if vig:
         chain.append(f"vignette={vig}")
-    grain = g.get("grain", 6)
+    # Film grain is OFF by default: temporal luma noise 4x's the bitrate (a 58MB
+    # cut became 200MB+) and platform re-encoding crushes it anyway. Opt in with
+    # video.grade.grain: <n> if you want it.
+    grain = g.get("grain", 0)
     if grain:
         chain.append(f"noise=c0_strength={grain}:c0_flags=t")
     if not chain:

@@ -368,8 +368,15 @@ def test_apply_video_grade_default_chain():
     assert lbl == "[vgraded]"
     joined = ";".join(parts)
     for f in ("eq=contrast=1.06", "colortemperature=temperature=5500:mix=0.25",
-              "vignette=PI/6", "noise=c0_strength=6:c0_flags=t"):
+              "vignette=PI/6"):
         assert f in joined
+    assert "noise=" not in joined              # grain off by default (bitrate)
+
+
+def test_apply_video_grade_grain_opt_in():
+    parts = []
+    render_ffmpeg._apply_video_grade(parts, "[vcat]", {"video": {"grade": {"grain": 4}}})
+    assert "noise=c0_strength=4:c0_flags=t" in ";".join(parts)
 
 
 def test_apply_video_grade_can_disable():
