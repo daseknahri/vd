@@ -160,16 +160,12 @@ def run(project: Project, cfg: dict, env: dict, *, force: bool = False) -> None:
         music_idx = next_idx
         cmd += ["-i", str(music)]
 
-    parts = [
-        _scene_filter(i, dur, width, height, fps, placeholder=clip is None)
-        for i, (dur, clip) in enumerate(scene_rows)
-    ]
-    parts.append("".join(f"[v{i}]" for i in range(n))
-                 + f"concat=n={n}:v=1:a=0[vcat]")
+    parts: list = []
+    vcat = _assemble_scenes(parts, scene_rows, width, height, fps, cfg)
     # One unifying grade pass (warm storybook look + a consistent look across the
     # SDXL / LTX / stock sources), applied ONCE before captions so the text and
     # icons composited afterward stay crisp and ungraded.
-    base = _apply_video_grade(parts, "[vcat]", cfg)
+    base = _apply_video_grade(parts, vcat, cfg)
     if cap_idx is not None:
         parts.append(
             f"{base}[{cap_idx}:v]overlay=x=0:y={band['y']}:shortest=1[vout]"
@@ -409,19 +405,60 @@ def _build_caption_track(entries: list[tuple[Path, float, float]],
 # --------------------------------------------------------------------------
 
 def _scene_filter(idx: int, dur: float, w: int, h: int, fps: Any,
-                  *, placeholder: bool) -> str:
+                  *, placeholder: bool, extra: float = 0.0) -> str:
+    # `extra` seconds of frozen tail are appended for crossfades (the transition
+    # blends this tail with the next scene's head). extra=0 -> exactly `dur`.
     d = f"{dur:.3f}"
+    td = f"{dur + extra:.3f}"
     if placeholder:
-        # lavfi color source already has the right size/rate/duration
-        return f"[{idx}:v]fps={fps},setsar=1,format=yuv420p[v{idx}]"
+        chain = f"[{idx}:v]fps={fps},setsar=1,format=yuv420p"
+        if extra > 0:
+            chain += (f",tpad=stop_mode=clone:stop_duration={td},"
+                      f"trim=duration={td},setpts=PTS-STARTPTS")
+        return chain + f"[v{idx}]"
     return (
         f"[{idx}:v]trim=duration={d},setpts=PTS-STARTPTS,"
         f"scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h},"
         f"fps={fps},setsar=1,format=yuv420p,"
-        # clip shorter than the scene -> freeze last frame; timing.json wins
-        f"tpad=stop_mode=clone:stop_duration={d},"
-        f"trim=duration={d},setpts=PTS-STARTPTS[v{idx}]"
+        # clip shorter than the scene (+extra) -> freeze last frame; timing wins
+        f"tpad=stop_mode=clone:stop_duration={td},"
+        f"trim=duration={td},setpts=PTS-STARTPTS[v{idx}]"
     )
+
+
+def _assemble_scenes(parts: list, scene_rows: list, w: int, h: int, fps: Any,
+                     cfg: dict) -> str:
+    """Append the per-scene filters + the concat/crossfade chain to `parts` and
+    return the final video label. Crossfade (video.crossfade, on by default)
+    DISSOLVES between scenes with a TIMELINE-PRESERVING xfade chain: each interior
+    scene gets a `D`-second frozen tail and the xfade offsets are the cumulative
+    scene durations, so the arithmetic nets back to exactly the original total —
+    the caption / icon / audio overlays (keyed to absolute time) stay in sync. The
+    last scene is not extended. Falls back to a hard concat when disabled or when
+    any scene is too short to dissolve cleanly."""
+    n = len(scene_rows)
+    xf = (cfg.get("video") or {}).get("crossfade", True)
+    D = float((xf if isinstance(xf, dict) else {}).get("duration", 0.4))
+    trans = (xf if isinstance(xf, dict) else {}).get("transition", "fade")
+    xf_on = (xf is not False and n > 1
+             and all(r[0] > D * 2 for r in scene_rows))
+    for i, (dur, clip) in enumerate(scene_rows):
+        extra = D if (xf_on and i < n - 1) else 0.0
+        parts.append(_scene_filter(i, dur, w, h, fps,
+                                   placeholder=clip is None, extra=extra))
+    if not xf_on:
+        parts.append("".join(f"[v{i}]" for i in range(n))
+                     + f"concat=n={n}:v=1:a=0[vcat]")
+        return "[vcat]"
+    cum = 0.0
+    cur = "[v0]"
+    for k in range(1, n):
+        cum += scene_rows[k - 1][0]      # offset = sum of prior scene durations
+        nxt = f"[xf{k}]"
+        parts.append(f"{cur}[v{k}]xfade=transition={trans}:"
+                     f"duration={D:.3f}:offset={cum:.3f}{nxt}")
+        cur = nxt
+    return cur
 
 
 def _audio_filter(voice_idx: int, music_idx: int | None, total: float,

@@ -7,6 +7,15 @@ video:
   height: 1920
   fps: 30
   target_seconds: 90
+  # --- Editing (research-backed; verified vs the ffmpeg binary). ---
+  crossfade:                  # gentle dissolves between scenes instead of hard
+    duration: 0.4             #   cuts. Timeline-preserving xfade chain. false =
+    transition: "fade"        #   hard cuts. xfade type: fade|fadeblack|dissolve|…
+  # grade: false              # disable the colour grade (default: warm eq + warmth
+  #   + subtle vignette; grain off). Or a dict: {eq, temperature, temp_mix,
+  #   vignette, grain}. grain>0 opts into film grain (bitrate-heavy).
+  # fade_in: 0.5              # picture fade from black on the open (seconds)
+  # fade_out: 2.0             # picture fade to black (default = the music outro)
 
 script:
   audience: "general Arab"

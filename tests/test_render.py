@@ -158,7 +158,8 @@ def test_final_ffmpeg_command_shape(rendered):
     final_cmd = next(c for c in report["commands"]
                      if str(proj.path(contract.FINAL)) in c)
     fc = final_cmd[final_cmd.index("-filter_complex") + 1]
-    assert "concat=n=2:v=1:a=0[vcat]" in fc
+    # two scenes -> crossfade (offset = scene-0's frame-rounded duration)
+    assert "xfade=transition=fade:duration=0.400:offset=" in fc
     assert "scale=320:568:force_original_aspect_ratio=increase,crop=320:568" in fc
     assert "overlay=x=0:y=400:shortest=1" in fc
     assert f"color=c={render_ffmpeg.PLACEHOLDER_COLOR}" in " ".join(final_cmd)
@@ -383,6 +384,36 @@ def test_apply_video_grade_can_disable():
     parts = []
     lbl = render_ffmpeg._apply_video_grade(parts, "[vcat]", {"video": {"grade": False}})
     assert lbl == "[vcat]" and parts == []
+
+
+def test_assemble_scenes_crossfade_chain():
+    parts = []
+    rows = [(3.0, "a.mp4"), (4.0, "b.mp4"), (5.0, "c.mp4")]
+    label = render_ffmpeg._assemble_scenes(parts, rows, 1080, 1920, 30, {})
+    assert label == "[xf2]"
+    joined = ";".join(parts)
+    # interior scenes get a 0.4s frozen tail; the last scene does not
+    assert "stop_duration=3.400" in joined and "stop_duration=4.400" in joined
+    assert "stop_duration=5.000" in joined
+    # xfade offsets are the CUMULATIVE scene durations (timeline-preserving)
+    assert "xfade=transition=fade:duration=0.400:offset=3.000[xf1]" in joined
+    assert "xfade=transition=fade:duration=0.400:offset=7.000[xf2]" in joined
+
+
+def test_assemble_scenes_hard_cut_when_disabled():
+    parts = []
+    rows = [(3.0, "a.mp4"), (4.0, "b.mp4")]
+    label = render_ffmpeg._assemble_scenes(
+        parts, rows, 1080, 1920, 30, {"video": {"crossfade": False}})
+    assert label == "[vcat]"
+    assert any("concat=n=2:v=1:a=0[vcat]" in p for p in parts)
+
+
+def test_assemble_scenes_falls_back_for_short_scenes():
+    parts = []                          # a 0.5s scene can't dissolve over 0.4s
+    rows = [(3.0, "a.mp4"), (0.5, "b.mp4"), (4.0, "c.mp4")]
+    label = render_ffmpeg._assemble_scenes(parts, rows, 1080, 1920, 30, {})
+    assert label == "[vcat]"
 
 
 def test_missing_manifest_is_contract_error(tmp_path):
