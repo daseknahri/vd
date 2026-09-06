@@ -195,6 +195,18 @@ audio:
   entrance_ramp: 2.5                 # slow settle back to bed level
   intro_fade: 1.2                    # music rises from silence over this
   outro_fade: 2.0                    # music fades out at the end (no hard stop)
+  # Transition SFX: a subtle page-turn at SECTION beats (the reference channel's
+  # "chapter turning" feel). It is an extra mix input — not ducked — set false to
+  # disable. Placement: an explicit per-project `scenes:` list of section-start
+  # ids reads most intentional; otherwise it fires on a mood change, coalesced by
+  # `min_gap` so oscillating moods don't put a turn on every cut.
+  sfx:
+    file: "assets/sfx/page.wav"       # 0.35s page-turn (synth); swap for a richer one
+    gain_db: -11                      # level vs the voice (loudnorm sets the master)
+    at: "sections"                    # "sections" (mood-shift, coalesced) | "every_scene"
+    min_gap: 14                       # seconds — never two turns closer than this (auto)
+    lead: 0.10                        # place the turn this many seconds before the cut
+    # scenes: [3, 6, 9, 12, 14]       # explicit section starts (overrides `at`) — per-project
 
 transcribe:
   model: "small"                     # faster-whisper model size

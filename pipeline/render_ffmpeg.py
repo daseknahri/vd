@@ -43,6 +43,7 @@ WORK_DIR = "render_work"
 CAPTIONS_MOV = "captions.mov"
 CAPTION_LIST = "captions_concat.txt"
 GAP_PNG = "_gap.png"
+SFX_BED = "sfx_bed.wav"  # pre-built transition-SFX track (page turns at section beats)
 ICONS_DIR = contract.ROOT / "assets" / "icons"  # pop-in emphasis icon PNGs
 
 PLACEHOLDER_COLOR = "0x202030"
@@ -66,6 +67,7 @@ def run(project: Project, cfg: dict, env: dict, *, force: bool = False) -> None:
     script = project.script()  # validate the spine; timing.json drives the cut
     icon_by_id = {int(s["id"]): s["icon"]
                   for s in script["scenes"] if s.get("icon")}
+    mood_by_id = {int(s["id"]): s.get("mood", "") for s in script["scenes"]}
     timing = project.timing()
     total = float(timing["total_seconds"])
     scenes = sorted(timing["scenes"], key=lambda s: float(s["start"]))
@@ -129,6 +131,21 @@ def run(project: Project, cfg: dict, env: dict, *, force: bool = False) -> None:
     music = _pick_music(cfg)
     report["music"] = music.as_posix() if music else None
 
+    # Transition SFX: a subtle page-turn at section beats, pre-built into one
+    # full-length bed (mirrors the caption track — one extra input downstream).
+    sfx_cfg = _sfx_config(acfg)
+    sfx_bed = None
+    if sfx_cfg is not None:
+        sfx_src = _sfx_source(sfx_cfg)
+        sfx_times = _sfx_times(scenes, mood_by_id, sfx_cfg)
+        sfx_bed = _build_sfx_bed(sfx_times, sfx_src, total, work, report, project)
+        report["sfx"] = {
+            "source": sfx_src.as_posix() if sfx_src else None,
+            "count": len(sfx_times),
+            "times": [round(t, 3) for t in sfx_times],
+            "gain_db": _sfx_gain_db(sfx_cfg),
+        }
+
     cmd = [ffmpeg_path(), "-y", "-hide_banner", "-nostats", "-nostdin"]
     for dur, clip in scene_rows:
         if clip is not None:
@@ -158,7 +175,13 @@ def run(project: Project, cfg: dict, env: dict, *, force: bool = False) -> None:
     music_idx = None
     if music is not None:
         music_idx = next_idx
+        next_idx += 1
         cmd += ["-i", str(music)]
+    sfx_idx = None
+    if sfx_bed is not None:
+        sfx_idx = next_idx
+        next_idx += 1
+        cmd += ["-i", str(sfx_bed)]
 
     parts: list = []
     vcat = _assemble_scenes(parts, scene_rows, width, height, fps, cfg)
@@ -198,7 +221,8 @@ def run(project: Project, cfg: dict, env: dict, *, force: bool = False) -> None:
     # against a fading track (research: a hard visual cut reads as unfinished).
     vlabel = _apply_video_fades(parts, vlabel, total, cfg, acfg)
 
-    parts.append(_audio_filter(voice_idx, music_idx, total, acfg))
+    parts.append(_audio_filter(voice_idx, music_idx, total, acfg,
+                               sfx_idx=sfx_idx))
 
     cmd += [
         "-filter_complex", ";".join(parts),
@@ -462,11 +486,22 @@ def _assemble_scenes(parts: list, scene_rows: list, w: int, h: int, fps: Any,
 
 
 def _audio_filter(voice_idx: int, music_idx: int | None, total: float,
-                  acfg: dict) -> str:
+                  acfg: dict, *, sfx_idx: int | None = None) -> str:
     lufs = _need(acfg, "loudness_lufs", "audio")
     master = f"loudnorm=I={lufs}:TP=-1.5:LRA=11,aresample=48000[aout]"
+    # The transition-SFX bed (pre-built, full length) is an optional extra amix
+    # input, level set by audio.sfx.gain_db. It is NOT ducked or graded — the
+    # page turns are meant to punctuate the cut, and loudnorm sets the master.
+    sfx_pre, sfx_lbl = "", ""
+    if sfx_idx is not None:
+        sgain = _sfx_gain_db(acfg.get("sfx") or {})
+        sfx_pre = f"[{sfx_idx}:a]volume={sgain:g}dB[sfxf];"
+        sfx_lbl = "[sfxf]"
     if music_idx is None:
-        return f"[{voice_idx}:a]{master}"
+        if sfx_idx is None:
+            return f"[{voice_idx}:a]{master}"
+        return (f"[{voice_idx}:a]anull[vo_mix];{sfx_pre}"
+                f"[vo_mix]{sfx_lbl}amix=inputs=2:duration=first,{master}")
     gain = _need(acfg, "music_gain_db", "audio")
     thr = _need(acfg, "duck_threshold", "audio")
     ratio = _need(acfg, "duck_ratio", "audio")
@@ -483,14 +518,17 @@ def _audio_filter(voice_idx: int, music_idx: int | None, total: float,
     outro = float(acfg.get("outro_fade", 2.0))
     fstart = max(0.0, total - outro)
     bed_outro = f",afade=t=out:st={fstart:.3f}:d={outro:.3f}" if outro > 0 else ""
-    return (
+    base = (
         f"[{voice_idx}:a]asplit=2[vo_mix][vo_sc];"
         f"[{music_idx}:a]aloop=loop=-1:size=2147483647,"
         f"atrim=duration={total:.3f},volume={gain}dB[bed];"
         f"[bed][vo_sc]{duck}[duck];"
         f"[duck]{_entrance_chain(acfg)}{bed_outro}[bedf];"
-        f"[vo_mix][bedf]amix=inputs=2:duration=first,{master}"
     )
+    if sfx_idx is None:
+        return base + f"[vo_mix][bedf]amix=inputs=2:duration=first,{master}"
+    return (base + sfx_pre +
+            f"[vo_mix][bedf]{sfx_lbl}amix=inputs=3:duration=first,{master}")
 
 
 def _entrance_chain(acfg: dict) -> str:
@@ -581,6 +619,110 @@ def _pick_music(cfg: dict) -> Path | None:
         key=lambda p: p.name.lower(),
     )
     return files[0] if files else None
+
+
+# --------------------------------------------------------------------------
+# Transition SFX (a subtle page-turn at section beats)
+# --------------------------------------------------------------------------
+
+def _sfx_config(acfg: dict) -> dict | None:
+    """The `audio.sfx` config as a dict, or None when SFX are off.
+
+    Off means: key absent, `false`, or `{enabled: false}`. `true` -> defaults.
+    """
+    s = acfg.get("sfx")
+    if s is None or s is False:
+        return None
+    if s is True:
+        return {}
+    if not isinstance(s, dict) or s.get("enabled") is False:
+        return None
+    return s
+
+
+def _sfx_source(scfg: dict) -> Path | None:
+    """Resolve the SFX clip (default assets/sfx/page.wav); None if it's missing."""
+    name = scfg.get("file", "assets/sfx/page.wav")
+    p = Path(name)
+    if not p.is_absolute():
+        p = contract.ROOT / p
+    return p if p.is_file() else None
+
+
+def _sfx_gain_db(scfg: dict) -> float:
+    return float(scfg.get("gain_db", -11.0))
+
+
+def _sfx_times(scenes: list[dict], mood_by_id: dict[int, str],
+               scfg: dict) -> list[float]:
+    """Absolute times (seconds) at which to fire the transition SFX.
+
+    An explicit `scfg['scenes']` (list of scene ids) wins: one hit just before
+    each listed scene's start — hand-placed section beats read as intentional.
+    Otherwise the auto heuristic fires on a mood change, coalesced so two hits
+    are never closer than `min_gap` seconds: the back half of a script often
+    oscillates mood every cut, and a page-turn on every scene reads as busy,
+    not sectional. The opening scene never gets a hit (nothing to turn from).
+    """
+    lead = float(scfg.get("lead", 0.10))
+    ordered = list(scenes)  # already sorted by start
+    start_by_id = {int(s["id"]): float(s["start"]) for s in ordered}
+    explicit = scfg.get("scenes")
+    if isinstance(explicit, list) and explicit:
+        times = [max(0.0, start_by_id[int(sid)] - lead)
+                 for sid in explicit
+                 if int(sid) in start_by_id and start_by_id[int(sid)] > 0.5]
+        return sorted(times)
+    mode = scfg.get("at", "sections")
+    min_gap = float(scfg.get("min_gap", 14.0))
+    times = []
+    prev_mood = None
+    last = -1e9
+    for i, s in enumerate(ordered):
+        st = float(s["start"])
+        mood = mood_by_id.get(int(s["id"]))
+        if i == 0:
+            prev_mood = mood
+            continue
+        hit = (mode == "every_scene") or (mood != prev_mood)
+        prev_mood = mood
+        if hit and st > 0.5 and (st - last) >= min_gap:
+            times.append(max(0.0, st - lead))
+            last = st
+    return times
+
+
+def _build_sfx_bed(times: list[float], source: Path, total: float, work: Path,
+                   report: dict, project: Project) -> Path | None:
+    """Pre-render one full-length track with the SFX placed at each `times`
+    entry, mirroring the captions.mov pattern (one extra input into the main
+    render). A silent base bounds it to [0, total]; each hit is delayed to its
+    time and amixed on top with normalize=0 so every hit keeps its own level.
+    Returns None when there is nothing to place."""
+    if not times or source is None:
+        return None
+    bed = work / SFX_BED
+    cmd = [ffmpeg_path(), "-y", "-hide_banner", "-nostats", "-nostdin",
+           "-f", "lavfi", "-i", "anullsrc=r=48000:cl=stereo"]
+    for _ in times:
+        cmd += ["-i", str(source)]
+    parts = [f"[0:a]atrim=duration={total:.3f}[base]"]
+    labels = ["[base]"]
+    for k, t in enumerate(times):
+        ms = int(round(t * 1000))
+        parts.append(
+            f"[{k + 1}:a]adelay={ms}|{ms},"
+            f"aformat=sample_rates=48000:channel_layouts=stereo[s{k}]"
+        )
+        labels.append(f"[s{k}]")
+    n = len(times) + 1
+    parts.append("".join(labels) +
+                 f"amix=inputs={n}:duration=first:normalize=0,"
+                 f"atrim=duration={total:.3f}[bed]")
+    cmd += ["-filter_complex", ";".join(parts), "-map", "[bed]",
+            "-c:a", "pcm_s16le", str(bed)]
+    _exec(cmd, report, project)
+    return bed
 
 
 # --------------------------------------------------------------------------

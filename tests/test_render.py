@@ -346,6 +346,75 @@ def test_audio_filter_gentle_duck_and_outro_fade():
     assert "afade=t=out:st=2.000:d=2.000[bedf]" in fc
 
 
+def test_audio_filter_sfx_folds_in_as_extra_amix_input():
+    acfg = dict(_cfg("unused")["audio"], sfx={"gain_db": -12})
+    # with music -> 3-way amix, sfx prepped at its own level, not ducked
+    with_music = render_ffmpeg._audio_filter(2, 3, TOTAL, acfg, sfx_idx=4)
+    assert "[4:a]volume=-12dB[sfxf]" in with_music
+    assert "[vo_mix][bedf][sfxf]amix=inputs=3:duration=first" in with_music
+    # the sfx label is NOT inside the sidechain/duck stage
+    assert "[sfxf]sidechaincompress" not in with_music
+    # voice-only + sfx -> 2-way amix (no bed plumbing)
+    no_music = render_ffmpeg._audio_filter(2, None, TOTAL, acfg, sfx_idx=4)
+    assert "[2:a]anull[vo_mix]" in no_music
+    assert "[vo_mix][sfxf]amix=inputs=2:duration=first" in no_music
+    # sfx off -> unchanged 2-way (music) / passthrough (voice-only)
+    assert "amix=inputs=2:duration=first" in render_ffmpeg._audio_filter(
+        2, 3, TOTAL, acfg)
+    assert "amix" not in render_ffmpeg._audio_filter(2, None, TOTAL, acfg)
+
+
+def test_sfx_config_on_off_and_shorthands():
+    assert render_ffmpeg._sfx_config({}) is None
+    assert render_ffmpeg._sfx_config({"sfx": False}) is None
+    assert render_ffmpeg._sfx_config({"sfx": {"enabled": False}}) is None
+    assert render_ffmpeg._sfx_config({"sfx": True}) == {}
+    assert render_ffmpeg._sfx_config({"sfx": {"gain_db": -9}}) == {"gain_db": -9}
+
+
+def test_sfx_times_explicit_scenes_win():
+    scenes = [{"id": 1, "start": 0.0}, {"id": 2, "start": 16.74},
+              {"id": 3, "start": 27.75}, {"id": 6, "start": 65.69}]
+    times = render_ffmpeg._sfx_times(
+        scenes, {}, {"scenes": [3, 6], "lead": 0.1})
+    assert times == [pytest.approx(27.65), pytest.approx(65.59)]
+    # scene 1 (start ~0) is never eligible even if listed
+    assert render_ffmpeg._sfx_times(scenes, {}, {"scenes": [1, 3]}) == [
+        pytest.approx(27.65)]
+
+
+def test_sfx_times_auto_coalesces_oscillating_moods():
+    # moods flip nearly every scene late; min_gap must thin them out
+    scenes = [{"id": i, "start": s} for i, s in
+              [(1, 0.0), (2, 16.7), (3, 27.7), (9, 103.0),
+               (10, 117.9), (11, 126.1)]]
+    moods = {1: "energetic", 2: "calm", 3: "archival", 9: "energetic",
+             10: "calm", 11: "energetic"}
+    times = render_ffmpeg._sfx_times(scenes, moods, {"min_gap": 14, "lead": 0.0})
+    # 16.7 (first shift) placed; 27.7 within 14s -> dropped; 103 placed;
+    # 117.9 is 14.9s after 103 (>=14) -> placed; 126.1 within 14s of it -> dropped
+    assert times == [pytest.approx(16.7), pytest.approx(103.0),
+                     pytest.approx(117.9)]
+
+
+def test_build_sfx_bed_matches_timeline(tmp_path):
+    proj = _make_project(tmp_path)
+    work = proj.path(render_ffmpeg.WORK_DIR)
+    work.mkdir(exist_ok=True)
+    src = tmp_path / "page.wav"
+    subprocess.run(
+        [FFMPEG, "-y", "-v", "error", "-f", "lavfi",
+         "-i", "sine=frequency=800:duration=0.3", "-ac", "2",
+         "-ar", "48000", str(src)], check=True, capture_output=True)
+    report = {"commands": []}
+    bed = render_ffmpeg._build_sfx_bed([0.5, 2.5], src, TOTAL, work, report, proj)
+    assert bed is not None and bed.exists()
+    dur = render_ffmpeg._probe(bed, report, proj)["duration"]
+    assert dur == pytest.approx(TOTAL, abs=0.05)
+    # nothing to place -> no bed
+    assert render_ffmpeg._build_sfx_bed([], src, TOTAL, work, report, proj) is None
+
+
 def test_apply_video_fades_adds_in_and_matched_out():
     parts = []
     lbl = render_ffmpeg._apply_video_fades(parts, "[vcat]", 10.0, {},

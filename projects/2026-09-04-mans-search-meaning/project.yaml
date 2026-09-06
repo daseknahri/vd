@@ -1,0 +1,18 @@
+# Arabic illustrated book-summary — 100% local, fixed-cost stack.
+# Overrides global config.yaml for this project only.
+voice:
+  provider: silma               # reliable self-hosted Arabic TTS (own venv)
+  silma:
+    ref_file: assets/voice/narrator_ar.wav   # cloned narrator (transcript: sibling .txt)
+footage:
+  ai_broll: true
+  broll:
+    engine: image               # SDXL storybook illustration + Ken Burns pan
+    max_seconds: 20             # illustration clips are cheap; cover the longest scene (~12s)
+audio:
+  sfx:
+    # Hand-placed section beats (act boundaries), so the page-turns read as
+    # chapter turns, not a turn on every cut: into the camps (3), into the
+    # meaning/insight (6), the key turn (9), the next movement (12), the drive
+    # to the conclusion (14).
+    scenes: [3, 6, 9, 12, 14]
