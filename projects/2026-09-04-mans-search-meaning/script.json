@@ -1,0 +1,147 @@
+{
+  "meta": {
+    "source_url": "topic://Man's Search for Meaning - Viktor Frankl",
+    "audience": "general Arab",
+    "dialect": "MSA",
+    "target_seconds": 135
+  },
+  "hook": "رجلٌ فقد كل شيء تقريباً، إلا شيئاً واحداً لا يستطيع أحدٌ أن يسلبه منه.",
+  "scenes": [
+    {
+      "id": 1,
+      "narration_ar": "رجلٌ فقد بيته، وعمله، وكل من يحب. فقد كل شيء تقريباً، إلا شيئاً واحداً لا يستطيع أحدٌ أن يسلبه منه. اسمه فيكتور فرانكل، طبيبٌ وعالم نفس نمساوي، وجد الجواب لا في كتاب، بل في أحلك تجربة عرفها إنسان.",
+      "keywords": [["elderly man portrait glasses"], ["vintage study window light"]],
+      "mood": "energetic",
+      "target_seconds": 9,
+      "broll_prompt": "Hand-drawn children's-book watercolor illustration, soft muted palette, gentle ink linework, storybook style — an elderly bald man with round glasses and a short white beard, kind gentle face, wearing a warm brown coat, sitting at a wooden desk by a tall window in an old Vienna study, soft daylight streaming in, a stack of books and a fountain pen beside him, dust motes gently drifting in the light."
+    },
+    {
+      "id": 2,
+      "narration_ar": "قبل الحرب، شغل فرانكل سؤال واحد: ما الذي يمنح الإنسان القوة على الاستمرار، حين تفقد الحياة كل معنى؟",
+      "keywords": [["man thinking window silhouette"], ["old notebook pen desk"]],
+      "mood": "calm",
+      "target_seconds": 8,
+      "broll_prompt": "Hand-drawn children's-book watercolor illustration, soft muted palette, gentle ink linework, storybook style — an elderly bald man with round glasses and a short white beard, kind gentle face, standing thoughtfully by a tall window in a cozy study at dusk, one hand resting on the windowsill, soft warm lamplight glowing behind him, a curtain swaying gently in the breeze.",
+      "icon": "question"
+    },
+    {
+      "id": 3,
+      "narration_ar": "ثم جاءت الحرب العالمية الثانية، فاعتقله النازيون مع أفراد عائلته، ونُقلوا جميعاً إلى معسكرات الاعتقال التي ستغيّر حياته إلى الأبد.",
+      "keywords": [["train station fog vintage"], ["barbed wire fence silhouette"]],
+      "mood": "archival",
+      "target_seconds": 8,
+      "broll_prompt": "an elderly bald man with round glasses and a short white beard, kind gentle face, looking back with quiet worry while holding a single small suitcase, standing in a quiet line of people beside a train at a foggy dawn platform, soft snow falling, muted blues and grays, tender and tasteful"
+    },
+    {
+      "id": 4,
+      "narration_ar": "في تلك المعتقلات، فقد فرانكل بيته وفقد عمله كطبيب، بل فقد أيضاً أشخاصاً كانوا أعزّ الناس على قلبه.",
+      "keywords": [["empty house door open"], ["faded family photo vintage"]],
+      "mood": "archival",
+      "target_seconds": 7,
+      "broll_prompt": "an elderly bald man with round glasses and a short white beard, kind gentle face, in a worn coat, standing alone outside a small quiet house with its door left ajar under a pale gray winter sky, holding a faded family photograph close to his chest, a look of quiet loss, bare trees"
+    },
+    {
+      "id": 5,
+      "narration_ar": "داخل المعسكر، عاش النزلاء على الجوع والبرد القارس، وسط خوف دائم لا يهدأ، وظلّ الموت رفيقاً حاضراً في كل يوم.",
+      "keywords": [["snow barbed wire distance"], ["thin prisoners sharing bread"]],
+      "mood": "archival",
+      "target_seconds": 8,
+      "broll_prompt": "an elderly bald man with round glasses and a short white beard, kind gentle face, thin and weary in worn ragged clothes, huddled with other gentle thin figures sharing a small piece of bread, a distant barbed-wire fence against a pale winter sky, soft snow, one small warm lantern, muted grays and blues, tender and tasteful, no violence"
+    },
+    {
+      "id": 6,
+      "narration_ar": "لكنه لاحظ أمراً مدهشاً حقاً: حتى من لم يبقَ له شيء تقريباً، كان بعضهم يجد سبباً واحداً يكفي ليستمر يوماً بعد يوم.",
+      "keywords": [["candle flame hands dark"], ["warm light dark room"]],
+      "mood": "calm",
+      "target_seconds": 9,
+      "broll_prompt": "an elderly bald man with round glasses and a short white beard, kind gentle face, thin in worn clothes, watching with quiet wonder as gentle cupped hands shelter a small glowing candle flame in the cold dark, warm golden light on his face, tiny sparks drifting upward, a hopeful mood"
+    },
+    {
+      "id": 7,
+      "narration_ar": "بالنسبة له، كان أحد تلك الأسباب صورة بسيطة: أمل أن يرى زوجته مرة أخرى، ويعانقها كما كان يفعل قبل الحرب.",
+      "keywords": [["vintage wedding photo sepia"], ["woman silhouette warm light"]],
+      "mood": "calm",
+      "target_seconds": 8,
+      "broll_prompt": "Hand-drawn children's-book watercolor illustration, soft muted palette, gentle ink linework, storybook style — an elderly bald man with round glasses and a short white beard, kind gentle face, sitting quietly with eyes closed, gently holding a small oval locket photograph of a smiling woman, soft warm light glowing around him, a faint dreamy halo of light in the background.",
+      "icon": "heart"
+    },
+    {
+      "id": 8,
+      "narration_ar": "وسببٌ آخر كان يتخيّل فيه نفسه طبيباً من جديد، يعود إلى عيادته، ويشارك الناس كل ما تعلّمه من تلك التجربة القاسية.",
+      "keywords": [["doctor writing notes desk"], ["man imagining future light"]],
+      "mood": "calm",
+      "target_seconds": 9,
+      "broll_prompt": "Hand-drawn children's-book watercolor illustration, soft muted palette, gentle ink linework, storybook style — an elderly bald man with round glasses and a short white beard, kind gentle face, imagined sitting at a doctor's desk again, gently writing in an open notebook, warm golden lamplight, a faint glowing outline of a lecture hall with soft listening silhouettes visible behind him like a dream."
+    },
+    {
+      "id": 9,
+      "narration_ar": "من هنا فهم فرانكل حقيقة غيّرت تفكيره: لا يملك الإنسان دائماً السيطرة على ما يحدث له، لكنه يملك دائماً حرية اختيار رد فعله تجاهه.",
+      "keywords": [["open hands sunlight clouds"], ["path forking crossroads"]],
+      "mood": "energetic",
+      "target_seconds": 10,
+      "broll_prompt": "an elderly bald man with round glasses and a short white beard, kind gentle face, in worn clothes, standing and raising his open hands gently toward a soft beam of sunlight breaking through parting gray clouds, a look of quiet realization and resolve, a narrow path forking on the ground below, warm hopeful light",
+      "icon": "sparkle"
+    },
+    {
+      "id": 10,
+      "narration_ar": "وأدرك أن المعنى لا يحتاج أن يكون أمراً عظيماً أو مشهوراً، بل قد يكون بسيطاً جداً.",
+      "keywords": [["seedling growing stone crack"], ["sunlight through window plant"]],
+      "mood": "calm",
+      "target_seconds": 7,
+      "broll_prompt": "an elderly bald man with round glasses and a short white beard, kind gentle face, kneeling gently to touch a single small green seedling growing from a crack in worn stone, a soft ray of warm sunlight on its leaves, tender wonder on his face, a quiet hopeful mood"
+    },
+    {
+      "id": 11,
+      "narration_ar": "قد يكون المعنى في حب إنسان، أو في عمل نؤديه بإخلاص، أو في مساعدة شخص محتاج، أو حتى في اختيار الشجاعة وسط الألم.",
+      "keywords": [["people holding hands circle"], ["sunrise hillside group silhouette"]],
+      "mood": "energetic",
+      "target_seconds": 9,
+      "broll_prompt": "an elderly bald man with round glasses and a short white beard, kind gentle face, in a warm coat, standing among a small gentle circle of people with linked hands at sunrise on a quiet hillside, a warm caring smile, golden light and soft long shadows, a sense of togetherness and quiet courage"
+    },
+    {
+      "id": 12,
+      "narration_ar": "بعد سنوات تلك المحنة، عاد فرانكل إلى عمله طبيباً نفسياً من جديد، وأسّس مدرسة علاجية جديدة، عُرفت باسم «العلاج بالمعنى».",
+      "keywords": [["therapist office armchair vintage"], ["man writing book desk"]],
+      "mood": "archival",
+      "target_seconds": 8,
+      "broll_prompt": "Hand-drawn children's-book watercolor illustration, soft muted palette, gentle ink linework, storybook style — an elderly bald man with round glasses and a short white beard, kind gentle face, sitting warmly in a cozy office armchair across from an empty chair, soft lamplight, a small potted plant on the windowsill, an open notebook and pen resting on a low wooden table beside him."
+    },
+    {
+      "id": 13,
+      "narration_ar": "تقوم فكرة العلاج بالمعنى على أن الدافع الأعمق للإنسان ليس اللذة ولا القوة، بل الحاجة إلى معنى لحياته.",
+      "keywords": [["open book glowing light"], ["book pages close up"]],
+      "mood": "calm",
+      "target_seconds": 7,
+      "broll_prompt": "an elderly bald man with round glasses and a short white beard, kind gentle face, in a warm coat, sitting at a wooden desk gently writing in a softly glowing open book, warm golden light rising from its pages like mist, a thoughtful gentle expression, a cozy quiet room"
+    },
+    {
+      "id": 14,
+      "narration_ar": "رسالة فرانكل ليست أن الألم شيء جيد، ولا أننا يجب أن نتقبّله ببساطة. بل إن الحياة قد تسلبنا كل خياراتنا، إلا خياراً واحداً يبقى لنا دوماً.",
+      "keywords": [["man walking storm determined"], ["lantern light rain night"]],
+      "mood": "energetic",
+      "target_seconds": 10,
+      "broll_prompt": "Hand-drawn children's-book watercolor illustration, soft muted palette, gentle ink linework, storybook style — an elderly bald man with round glasses and a short white beard, kind gentle face, walking steadily along a narrow path through a gentle gray storm, wrapped in a warm coat, one small lantern held before him glowing warmly, soft rain and wind depicted gently, calm determined posture."
+    },
+    {
+      "id": 15,
+      "narration_ar": "وذلك الخيار هو كيف نواجه ما يحدث لنا. هذا ما يجعل كتاب فرانكل حياً بعد عقود طويلة.",
+      "keywords": [["old book windowsill sunset"], ["hands holding open book"]],
+      "mood": "calm",
+      "target_seconds": 7,
+      "broll_prompt": "an elderly bald man with round glasses and a short white beard, kind gentle face, in a warm coat, sitting by a window at sunset holding his worn open book, warm golden light falling across the pages, a gentle knowing smile, a cozy quiet room fading softly behind him"
+    },
+    {
+      "id": 16,
+      "narration_ar": "فالكتاب ليس قصة عن أحلك أيام التاريخ وحدها، بل قصة عن الأمل الذي يولد وسط أقسى الظروف. وربما يستحق كل واحد منا أن يسأل نفسه: ما الذي يمنح حياته معناها؟",
+      "keywords": [["sunrise horizon silhouette person"], ["hilltop path golden light"]],
+      "mood": "calm",
+      "target_seconds": 12,
+      "broll_prompt": "an elderly bald man with round glasses and a short white beard, kind gentle face, in a warm brown coat, standing on a quiet hilltop path facing a warm golden sunrise, seen from behind and slightly to the side, a peaceful hopeful expression, gentle light over rolling green hills, a wide open horizon"
+    }
+  ],
+  "post": {
+    "title": "فيكتور فرانكل: كيف يجد الإنسان معنى وسط أقسى الظروف",
+    "description": "رحلة فيكتور فرانكل، الطبيب النمساوي الذي فقد كل شيء تقريباً في معسكرات الاعتقال النازية، ووجد رغم ذلك سبباً للاستمرار. من تجربته وُلدت فكرة العلاج بالمعنى، وسؤال ما زال يستحق أن يُطرح: ما الذي يمنح حياتنا معناها؟",
+    "hashtags": ["#فيكتور_فرانكل", "#الإنسان_يبحث_عن_المعنى", "#تنمية_ذاتية", "#كتب", "#إلهام"]
+  }
+}

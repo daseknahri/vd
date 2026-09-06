@@ -4,6 +4,10 @@ voice:
   provider: silma               # reliable self-hosted Arabic TTS (own venv)
   silma:
     ref_file: assets/voice/narrator_ar.wav   # cloned narrator (transcript: sibling .txt)
+video:
+  speed: 1.0                    # natural. 1.15x via atempo compressed Arabic vowel
+                                # length (read as mispronunciation); get pace from
+                                # tighter pauses instead, not time-stretching.
 footage:
   ai_broll: true
   broll:
